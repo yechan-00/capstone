@@ -1,0 +1,30 @@
+name: hanyang-a11y
+
+# Hanyang-A11y — Step 1: local PostgreSQL for MVP
+# Usage:
+#   cp .env.example .env   # then edit passwords if needed
+#   docker compose up -d
+#   docker compose ps
+# Stop: docker compose down  (data kept in volume)  |  remove data: docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hanyang-a11y-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-hanyang}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-hanyang_dev_change_me}"
+      POSTGRES_DB: "${POSTGRES_DB:-hanyang_a11y}"
+    volumes:
+      - hanyang_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hanyang} -d ${POSTGRES_DB:-hanyang_a11y}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  hanyang_pgdata:

@@ -1,0 +1,22 @@
+diff --git a/node_modules/react-mobile-picker/dist/react-mobile-picker.js b/node_modules/react-mobile-picker/dist/react-mobile-picker.js
+index 0912493..acf7dbc 100644
+--- a/node_modules/react-mobile-picker/dist/react-mobile-picker.js
++++ b/node_modules/react-mobile-picker/dist/react-mobile-picker.js
+@@ -207,7 +207,7 @@ function lt({
+   }, [k, C]), D = y(null), j = l((t) => {
+     if (t.deltaY === 0)
+       return;
+-    let a = t.deltaY * 0.1;
++    let a = t.deltaY * 0.045;
+     Math.abs(a) < n && (a = n * Math.sign(a)), s === "normal" && (a = -a);
+     const B = f + a;
+     S(B);
+@@ -216,7 +216,7 @@ function lt({
+   }, [m]), _ = l((t) => {
+     s !== "off" && (t.cancelable && t.preventDefault(), j(t), D.current && clearTimeout(D.current), D.current = setTimeout(() => {
+       z();
+-    }, 200));
++    }, 320));
+   }, [z, j, D, s]), V = y(null);
+   A(() => {
+     const t = V.current;

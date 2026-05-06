@@ -1,0 +1,120 @@
+import React from 'react';
+import { View, Text, StyleSheet, type DimensionValue } from 'react-native';
+import { CategoryInsight, MoodInsight, TimeOfDayInsight } from '@/lib/types';
+import { EXPENSE_CATEGORIES, EXPENSE_MOODS } from '@/lib/constants';
+
+interface InsightChartPlaceholderProps {
+  data: CategoryInsight[] | MoodInsight[] | TimeOfDayInsight[];
+  type: 'category' | 'mood' | 'timeOfDay';
+}
+
+export const InsightChartPlaceholder: React.FC<InsightChartPlaceholderProps> = ({
+  data,
+  type,
+}) => {
+  const getLabel = (value: string) => {
+    if (type === 'category') {
+      return EXPENSE_CATEGORIES.find((c) => c.value === value)?.label || value;
+    }
+    if (type === 'mood') {
+      return EXPENSE_MOODS.find((m) => m.value === value)?.label || value;
+    }
+    const timeLabels: Record<string, string> = {
+      morning: '아침',
+      afternoon: '점심',
+      evening: '저녁',
+      night: '밤',
+    };
+    return timeLabels[value] || value;
+  };
+
+  if (data.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>데이터가 없습니다</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {data.map((item, index) => {
+        const label = getLabel(
+          'category' in item ? item.category : 'mood' in item ? item.mood : item.timeOfDay
+        );
+        const regretRate = item.regretRate;
+        const barWidth = `${Math.min(100, regretRate)}%`;
+        const barColor =
+          regretRate >= 50 ? '#FF6B6B' : regretRate >= 20 ? '#FFA726' : '#4CAF50';
+
+        return (
+          <View key={index} style={styles.item}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>{label}</Text>
+              <Text style={styles.rate}>{regretRate.toFixed(1)}%</Text>
+            </View>
+            <View style={styles.barContainer}>
+              <View
+                style={[
+                  styles.bar,
+                  { width: barWidth as DimensionValue, backgroundColor: barColor },
+                ]}
+              />
+            </View>
+            <Text style={styles.count}>
+              {item.regretCount}/{item.totalCount}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+  },
+  item: {
+    marginBottom: 16,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  label: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  rate: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  barContainer: {
+    height: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  bar: {
+    height: '100%',
+    backgroundColor: '#FF6B6B',
+    borderRadius: 4,
+  },
+  count: {
+    fontSize: 12,
+    color: '#999',
+  },
+  empty: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#999',
+  },
+});

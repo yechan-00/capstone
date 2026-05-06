@@ -1,0 +1,23 @@
+rules_version = '2';
+// Firebase Console → Storage → Rules 에 붙여 넣거나
+// firebase deploy --only storage 시 이 파일을 프로젝트에 연결하세요.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 앱 업로드 경로: users/{uid}/expenses/{fileName}
+    match /users/{userId}/expenses/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 6 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
