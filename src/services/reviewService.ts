@@ -59,15 +59,21 @@ export const reviewService = {
         return reviewRef.id;
       });
 
-      if (notificationId) {
-        try {
-          await cancelReminder(notificationId);
-        } catch (error) {
-          console.warn('Failed to cancel notification:', error);
+      // 저장 응답 지연을 줄이기 위해 후처리는 백그라운드로 진행
+      void (async () => {
+        if (notificationId) {
+          try {
+            await cancelReminder(notificationId);
+          } catch (error) {
+            console.warn('Failed to cancel notification:', error);
+          }
         }
-      }
-
-      await scheduleService.skipAllPendingSchedulesForExpense(review.expenseId, review.accountId);
+        try {
+          await scheduleService.skipAllPendingSchedulesForExpense(review.expenseId, review.accountId);
+        } catch (error) {
+          console.warn('Failed to skip pending schedules after review:', error);
+        }
+      })();
 
       return reviewId;
     } catch (error) {

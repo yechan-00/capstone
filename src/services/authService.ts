@@ -9,16 +9,28 @@ import {
   updateEmail,
   updatePassword,
   reload,
+  linkWithCredential,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Account } from '@/lib/types';
-import { DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
+import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
 import { timestampToDate } from '@/utils/firestore';
 
 export const signUp = async (email: string, password: string): Promise<UserCredential> => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const current = auth.currentUser;
+    const trimmedEmail = email.trim();
+
+    // 익명(게스트) 사용 중이면 "새 계정 생성"이 아니라 현재 계정에 이메일/비번을 연결(link)
+    const userCredential = current?.isAnonymous
+      ? await (async () => {
+          const cred = EmailAuthProvider.credential(trimmedEmail, password);
+          const linked = await linkWithCredential(current, cred);
+          return linked;
+        })()
+      : await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+
     const user = userCredential.user;
 
     // 회원가입 후 자동으로 Account 생성
@@ -31,6 +43,7 @@ export const signUp = async (email: string, password: string): Promise<UserCrede
       notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
       reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
       reviewReminderEnabled: true,
+      reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
       monthlyIncomeAmount: 0,
       monthlyIncomeCurrency: 'KRW',
       exchangeRateUsdToKrw: 1470.05,
@@ -38,11 +51,16 @@ export const signUp = async (email: string, password: string): Promise<UserCrede
       updatedAt: new Date(),
     };
 
-    await setDoc(doc(db, 'accounts', accountId), {
-      ...account,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    // 기존 게스트가 이미 계정 문서를 가지고 있을 수 있으므로 merge로 안전하게 갱신
+    await setDoc(
+      doc(db, 'accounts', accountId),
+      {
+        ...account,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     return userCredential;
   } catch (error: any) {
@@ -102,6 +120,14 @@ export const getUserAccount = async (userId: string): Promise<Account | null> =>
       notificationTime: typeof data.notificationTime === 'string' ? data.notificationTime : undefined,
       reviewReminderTime,
       reviewReminderEnabled: data.reviewReminderEnabled !== false,
+      reviewDelayDays:
+        Array.isArray(data.reviewDelayDays)
+          ? data.reviewDelayDays
+              .filter((d: unknown) => d === 1 || d === 3 || d === 7 || d === 30)
+              .slice(0, 8)
+          : data.reviewDelayDays === 7 || data.reviewDelayDays === 30
+            ? [data.reviewDelayDays]
+            : [3],
       monthlyIncomeAmount: typeof data.monthlyIncomeAmount === 'number' ? data.monthlyIncomeAmount : 0,
       monthlyIncomeCurrency: data.monthlyIncomeCurrency === 'USD' ? 'USD' : 'KRW',
       exchangeRateUsdToKrw:
@@ -147,6 +173,25 @@ export const updateReviewReminderSettings = async (
   } catch (error) {
     console.error('Failed to update review reminder:', error);
     throw new Error('리뷰 알림 설정을 저장하는데 실패했습니다.');
+  }
+};
+
+export const updateReviewDelayDays = async (
+  accountId: string,
+  reviewDelayDays: (1 | 3 | 7 | 30)[]
+): Promise<void> => {
+  try {
+    await setDoc(
+      doc(db, 'accounts', accountId),
+      {
+        reviewDelayDays,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.error('Failed to update review delay days:', error);
+    throw new Error('리뷰 주기를 저장하는데 실패했습니다.');
   }
 };
 

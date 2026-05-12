@@ -4,6 +4,7 @@ import type { Account } from '@/lib/types';
 export const DEFAULT_REVIEW_REMINDER_TIME = '19:00';
 
 export const DEFAULT_EXCHANGE_USD_KRW = 1470.05;
+export const DEFAULT_REVIEW_DELAY_DAYS: readonly (1 | 3 | 7 | 30)[] = [3];
 
 /**
  * 계정에 저장된 월 수입을 원화 기준으로 환산합니다.
@@ -38,4 +39,15 @@ export function resolveReviewReminderTime(account: Account | null): string {
 export function resolveReviewReminderEnabled(account: Account | null): boolean {
   if (!account) return true;
   return account.reviewReminderEnabled !== false;
+}
+
+export function resolveReviewDelayDays(account: Account | null): (1 | 3 | 7 | 30)[] {
+  const raw = account?.reviewDelayDays as unknown;
+  if (Array.isArray(raw)) {
+    const filtered = raw.filter((d) => d === 1 || d === 3 || d === 7 || d === 30) as (1 | 3 | 7 | 30)[];
+    const uniq = Array.from(new Set(filtered));
+    return uniq.length > 0 ? uniq.sort((a, b) => a - b) : [...DEFAULT_REVIEW_DELAY_DAYS];
+  }
+  if (raw === 3 || raw === 7 || raw === 30) return [raw];
+  return [...DEFAULT_REVIEW_DELAY_DAYS];
 }

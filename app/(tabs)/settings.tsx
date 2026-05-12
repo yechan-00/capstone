@@ -13,7 +13,7 @@ import {
   Pressable,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/theme/ThemeContext';
 import { useDebouncedEffect } from '@/hooks/useDebouncedEffect';
@@ -21,6 +21,7 @@ import { SettingsCard } from '@/components/SettingsCard';
 import { Chip } from '@/components/Chip';
 import {
   DEFAULT_REVIEW_REMINDER_TIME,
+  resolveReviewDelayDays,
   resolveReviewReminderEnabled,
   resolveReviewReminderTime,
 } from '@/lib/accountSettings';
@@ -44,10 +45,12 @@ function parseReminderTimeToDate(time: string): Date {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user, account, logout, updateReviewReminderSettings, updateMonthlyIncome } = useAuth();
+  const isFocusedRef = useRef(false);
+  const { user, account, logout, updateReviewReminderSettings, updateReviewDelayDays, updateMonthlyIncome } = useAuth();
   const { colors, isDark, setDarkMode } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
+  const [reviewDelayDays, setReviewDelayDays] = useState<(1 | 3 | 7 | 30)[]>([3]);
   const [showTimePicker, setShowTimePicker] = useState(false);
   /** iOS 모달에서 스크롤과 겹치지 않게 휠 조작용 */
   const [pendingTime, setPendingTime] = useState<Date>(() => new Date());
@@ -73,11 +76,27 @@ export default function SettingsScreen() {
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
+  useFocusEffect(
+    React.useCallback(() => {
+      isFocusedRef.current = true;
+      return () => {
+        isFocusedRef.current = false;
+      };
+    }, [])
+  );
+
   useEffect(() => {
     const t = resolveReviewReminderTime(account);
     setTimeValue(parseReminderTimeToDate(t));
     setReviewReminderEnabled(resolveReviewReminderEnabled(account));
-  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled]);
+    setReviewDelayDays((prev) => {
+      const next = resolveReviewDelayDays(account);
+      if (prev.length === next.length && prev.every((v, i) => v === next[i])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled, account?.reviewDelayDays]);
 
   useEffect(() => {
     if (!account) return;
@@ -166,6 +185,24 @@ export default function SettingsScreen() {
     }
   };
 
+  const saveReviewDelayDays = async (days: (1 | 3 | 7 | 30)[]) => {
+    try {
+      const accountDays = resolveReviewDelayDays(account);
+      if (accountDays.length === days.length && accountDays.every((v, i) => v === days[i])) {
+        return;
+      }
+      setSaving(true);
+      await updateReviewDelayDays(days);
+      setNotificationSaved(true);
+      scrollToTop();
+      setTimeout(() => setNotificationSaved(false), 2000);
+    } catch {
+      Alert.alert('리뷰 주기', '저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveMonthlyIncome = async (showAlert: boolean = true) => {
     const parsed = parseIncomeAmount();
     if (parsed === null || parsed < 0) {
@@ -206,6 +243,7 @@ export default function SettingsScreen() {
   };
 
   useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
     if (!account?.id) return;
     if (!incomeInitRef.current) {
       incomeInitRef.current = true;
@@ -215,6 +253,7 @@ export default function SettingsScreen() {
   }, [incomeAmount, incomeCurrency, incomeUnit, exchangeRate, account?.id], 800);
 
   useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
     if (!account?.id) return;
     if (!reminderInitRef.current) {
       reminderInitRef.current = true;
@@ -222,6 +261,13 @@ export default function SettingsScreen() {
     }
     void saveReviewReminder(timeValue, reviewReminderEnabled);
   }, [timeValue, reviewReminderEnabled, account?.id], 500);
+
+  useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
+    if (!account?.id) return;
+    if (!reminderInitRef.current) return;
+    void saveReviewDelayDays(reviewDelayDays);
+  }, [reviewDelayDays, account?.id], 500);
 
   const styles = useMemo(
     () =>
@@ -412,7 +458,7 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           await logout();
-          router.replace('/(auth)/login');
+          router.replace('/(tabs)');
         },
       },
     ]);
@@ -515,6 +561,26 @@ export default function SettingsScreen() {
                 <Text style={styles.timePickerText}>{formatDisplayTime(timeValue)}</Text>
               </TouchableOpacity>
             </View>
+          </View>
+          <View style={styles.infoRowColumn}>
+            <Text style={styles.label}>리뷰 피드백 주기</Text>
+            <View style={styles.chipRow}>
+              {[1, 3, 7, 30].map((d) => (
+                <Chip
+                  key={d}
+                  label={`${d}일`}
+                  active={reviewDelayDays.includes(d as any)}
+                  onPress={() => {
+                    setReviewDelayDays((prev) => {
+                      const has = prev.includes(d as any);
+                      const next = has ? prev.filter((x) => x !== d) : [...prev, d as any];
+                      return next.length > 0 ? next.sort((a, b) => a - b) : [3];
+                    });
+                  }}
+                />
+              ))}
+            </View>
+            <Text style={styles.helperText}>소비 후 몇 일 뒤에 리뷰를 요청할지 선택해요.</Text>
           </View>
           {Platform.OS === 'android' && showTimePicker && reviewReminderEnabled && (
             <DateTimePicker

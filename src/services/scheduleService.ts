@@ -11,12 +11,13 @@ import {
   Timestamp,
   serverTimestamp,
   limit,
+  DocumentReference,
 } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
 import { db } from '@/lib/firebase';
 import { ReviewSchedule, ScheduleStatus, ScheduleType } from '@/lib/types';
 import { timestampToDate } from '@/utils/firestore';
-import { cancelReminder, computeReviewReminderDueDates, scheduleReviewReminder } from '@/services/notificationService';
+import { cancelReminder, scheduleReviewReminder } from '@/services/notificationService';
 
 const COLLECTION_NAME = 'review_schedules';
 
@@ -39,6 +40,21 @@ function reviewNotificationCopy(_type: ScheduleType): { title: string; body: str
   };
 }
 
+function mapDelayDaysToScheduleType(days: 1 | 3 | 7 | 30): ScheduleType {
+  if (days === 1) return 'd1';
+  if (days === 7) return 'd7';
+  if (days === 30) return 'd30';
+  return 'd3';
+}
+
+function computeDueAtByDelayDays(spentAt: Date, delayDays: 1 | 3 | 7 | 30, notificationTime?: string): Date {
+  const d = new Date(spentAt);
+  d.setDate(d.getDate() + delayDays);
+  const [hour, minute] = (notificationTime || '19:00').split(':').map((v) => Number(v));
+  d.setHours(Number.isNaN(hour) ? 19 : hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
+  return d;
+}
+
 /** 소비당 대기 카드 1개: dueAt 오름차순에서 같은 expenseId는 첫 항목만 유지 */
 function dedupePendingSchedulesByExpense(schedules: ReviewSchedule[]): ReviewSchedule[] {
   const seen = new Set<string>();
@@ -58,10 +74,12 @@ export const scheduleService = {
     spentAt: Date
   ): Promise<void> {
     const notificationTime = await this.getAccountNotificationTime(accountId);
-    const dueDates = computeReviewReminderDueDates(spentAt, notificationTime);
-    const schedules: { type: ScheduleType; delayDays: number; dueAt: Date }[] = [
-      { type: 'd3', delayDays: 3, dueAt: dueDates.d3 },
-    ];
+    const reviewDelayDays = await this.getAccountReviewDelayDays(accountId);
+    const schedules: { type: ScheduleType; delayDays: number; dueAt: Date }[] = reviewDelayDays.map((d) => ({
+      type: mapDelayDaysToScheduleType(d),
+      delayDays: d,
+      dueAt: computeDueAtByDelayDays(spentAt, d, notificationTime),
+    }));
 
     // 각 스케줄마다 알림은 시도하되 실패해도 Firestore 저장은 계속
     const results = await Promise.all(
@@ -96,6 +114,7 @@ export const scheduleService = {
         });
       })
     );
+
   },
 
   async scheduleNotification(
@@ -210,7 +229,13 @@ export const scheduleService = {
     const notificationId = snapshot.exists()
       ? (snapshot.data().notificationId as string | undefined)
       : undefined;
+    await this.updateScheduleToSkipped(scheduleRef, notificationId);
+  },
 
+  async updateScheduleToSkipped(
+    scheduleRef: DocumentReference,
+    notificationId?: string
+  ): Promise<void> {
     await updateDoc(scheduleRef, {
       status: 'skipped' as ScheduleStatus,
       completedAt: serverTimestamp(),
@@ -232,13 +257,16 @@ export const scheduleService = {
         where('status', '==', 'pending')
       );
       const snapshot = await getDocs(q);
-      for (const d of snapshot.docs) {
-        try {
-          await this.markAsSkippedQuiet(d.id);
-        } catch (err) {
-          console.error('Failed to skip schedule', d.id, err);
-        }
-      }
+      await Promise.all(
+        snapshot.docs.map(async (d) => {
+          try {
+            const notificationId = d.data().notificationId as string | undefined;
+            await this.updateScheduleToSkipped(doc(db, COLLECTION_NAME, d.id), notificationId);
+          } catch (err) {
+            console.error('Failed to skip schedule', d.id, err);
+          }
+        })
+      );
     } catch (error) {
       console.error('Failed to skip pending schedules for expense:', error);
     }
@@ -272,8 +300,11 @@ export const scheduleService = {
       const snapshot = await getDoc(scheduleRef);
       const expenseId = snapshot.exists() ? (snapshot.data().expenseId as string) : null;
       const accountId = snapshot.exists() ? (snapshot.data().accountId as string) : null;
+      const notificationId = snapshot.exists()
+        ? (snapshot.data().notificationId as string | undefined)
+        : undefined;
 
-      await this.markAsSkippedQuiet(scheduleId);
+      await this.updateScheduleToSkipped(scheduleRef, notificationId);
 
       if (expenseId && accountId) {
         await this.skipAllPendingSchedulesForExpense(expenseId, accountId);
@@ -306,6 +337,26 @@ export const scheduleService = {
     } catch (error) {
       console.error('Failed to get account notification time:', error);
       return undefined;
+    }
+  },
+
+  async getAccountReviewDelayDays(accountId: string): Promise<(1 | 3 | 7 | 30)[]> {
+    try {
+      const accountDoc = await getDoc(doc(db, 'accounts', accountId));
+      if (!accountDoc.exists()) {
+        return [3];
+      }
+      const raw = accountDoc.data().reviewDelayDays as unknown;
+      if (Array.isArray(raw)) {
+        const filtered = raw.filter((d) => d === 1 || d === 3 || d === 7 || d === 30) as (1 | 3 | 7 | 30)[];
+        const uniq = Array.from(new Set(filtered));
+        return uniq.length > 0 ? uniq.sort((a, b) => a - b) : [3];
+      }
+      if (raw === 7 || raw === 30 || raw === 3) return [raw];
+      return [3];
+    } catch (error) {
+      console.error('Failed to get account review delay days:', error);
+      return [3];
     }
   },
 };

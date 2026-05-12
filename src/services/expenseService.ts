@@ -23,6 +23,11 @@ const COLLECTION_NAME = 'expenses';
 const SCHEDULES_COLLECTION = 'review_schedules';
 const REVIEWS_COLLECTION = 'reviews';
 
+function stripUndefinedFields<T extends Record<string, unknown>>(value: T): T {
+  const entries = Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined);
+  return Object.fromEntries(entries) as T;
+}
+
 function toExpense(id: string, data: Record<string, unknown>): Expense {
   const category = normalizeExpenseCategory(data.category as string | undefined);
   const itemRaw = data.item ?? data.content;
@@ -55,7 +60,7 @@ export const expenseService = {
     try {
       const category = normalizeExpenseCategory(expense.category);
       const item = expense.item?.trim() || expense.content?.trim() || undefined;
-      const expenseRef = await addDoc(collection(db, COLLECTION_NAME), {
+      const createData = stripUndefinedFields({
         ...expense,
         category,
         item,
@@ -64,6 +69,7 @@ export const expenseService = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      const expenseRef = await addDoc(collection(db, COLLECTION_NAME), createData);
 
       const expenseId = expenseRef.id;
 
@@ -108,9 +114,27 @@ export const expenseService = {
     }
   },
 
+  async getByAccountIdInRange(accountId: string, start: Date, end: Date): Promise<Expense[]> {
+    try {
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('accountId', '==', accountId),
+        where('spentAt', '>=', Timestamp.fromDate(start)),
+        where('spentAt', '<=', Timestamp.fromDate(end)),
+        orderBy('spentAt', 'desc')
+      );
+
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((doc) => toExpense(doc.id, doc.data()));
+    } catch (error) {
+      console.error('Failed to get expenses in range:', error);
+      throw new Error('기간 내 소비 목록을 조회하는데 실패했습니다.');
+    }
+  },
+
   async update(expenseId: string, updates: Partial<Expense>): Promise<void> {
     try {
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         ...updates,
         updatedAt: serverTimestamp(),
       };
@@ -123,7 +147,7 @@ export const expenseService = {
       delete updateData.accountId;
       delete updateData.id;
 
-      await updateDoc(doc(db, COLLECTION_NAME, expenseId), updateData);
+      await updateDoc(doc(db, COLLECTION_NAME, expenseId), stripUndefinedFields(updateData));
     } catch (error) {
       console.error('Failed to update expense:', error);
       throw new Error('소비를 수정하는데 실패했습니다.');

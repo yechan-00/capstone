@@ -102,6 +102,10 @@ export default function LoginScreen() {
             >
               <Text style={styles.linkText}>회원가입</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.linkButton} onPress={() => router.replace('/(tabs)')}>
+              <Text style={styles.linkText}>로그인 없이 둘러보기</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>

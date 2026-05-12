@@ -7,10 +7,10 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
+import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Account } from '@/lib/types';
-import { DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
+import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays } from '@/lib/accountSettings';
 import * as authService from '@/services/authService';
 
 interface AuthContextType {
@@ -21,6 +21,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateReviewReminderSettings: (enabled: boolean, reviewReminderTime: string) => Promise<void>;
+  updateReviewDelayDays: (reviewDelayDays: (1 | 3 | 7 | 30)[]) => Promise<void>;
   updateMonthlyIncome: (
     amount: number,
     currency: 'KRW' | 'USD',
@@ -55,6 +56,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
               reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
               reviewReminderEnabled: true,
+              reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
               monthlyIncomeAmount: 0,
               monthlyIncomeCurrency: 'KRW',
               exchangeRateUsdToKrw: 1470.05,
@@ -77,6 +79,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
             reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
             reviewReminderEnabled: true,
+            reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
             monthlyIncomeAmount: 0,
             monthlyIncomeCurrency: 'KRW',
             exchangeRateUsdToKrw: 1470.05,
@@ -84,7 +87,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             updatedAt: new Date(),
           });
         } else {
-          setAccount(null);
+          try {
+            await signInAnonymously(auth);
+          } catch {
+            setAccount(null);
+          }
         }
       } finally {
         setLoading(false);
@@ -147,6 +154,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
+  const updateReviewDelayDays = useCallback(async (reviewDelayDays: (1 | 3 | 7 | 30)[]) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const accountId = `account_${uid}`;
+    await authService.updateReviewDelayDays(accountId, reviewDelayDays);
+    setAccount((prev) => (prev ? { ...prev, reviewDelayDays: resolveReviewDelayDays({ ...(prev as any), reviewDelayDays }) } : null));
+  }, []);
+
   const changeEmail = useCallback(async (newEmail: string, currentPassword: string) => {
     await authService.changeAccountEmail(newEmail, currentPassword);
     setUser(auth.currentUser);
@@ -173,6 +188,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn,
       logout,
       updateReviewReminderSettings,
+      updateReviewDelayDays,
       updateMonthlyIncome,
       changeEmail,
       changePassword,
@@ -186,6 +202,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn,
       logout,
       updateReviewReminderSettings,
+      updateReviewDelayDays,
       updateMonthlyIncome,
       changeEmail,
       changePassword,

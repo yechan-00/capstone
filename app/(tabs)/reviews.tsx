@@ -128,7 +128,7 @@ export default function ReviewsScreen() {
           <View style={[styles.empty, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>평가할 항목이 없습니다</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSec }]}>
-              소비를 기록하면 3일 뒤 리뷰 알림이 생겨요. 식후 바로는 기록 화면에서 한 줄로 남길 수 있어요.
+              소비를 기록하면 D+{Array.isArray(account?.reviewDelayDays) ? account?.reviewDelayDays.join(',') : (account?.reviewDelayDays ?? 3)} 리뷰 알림이 생겨요. 식후 바로는 기록 화면에서 한 줄로 남길 수 있어요.
             </Text>
             <PrimaryButton label="소비 추가하기" onPress={() => router.push('/add-expense')} />
           </View>

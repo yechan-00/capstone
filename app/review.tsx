@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +24,7 @@ import { reviewService } from '@/services/reviewService';
 import { scheduleService } from '@/services/scheduleService';
 import { useAuth } from '@/hooks/useAuth';
 import { DecisionAgain, RegretReason } from '@/lib/types';
+import { useTheme } from '@/theme/ThemeContext';
 
 type Step = 1 | 2 | 3;
 
@@ -29,6 +32,7 @@ export default function ReviewScreen() {
   const router = useRouter();
   const { user, account } = useAuth();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const rawParams = useLocalSearchParams<{
     expenseId?: string | string[];
     scheduleId?: string | string[];
@@ -52,7 +56,13 @@ export default function ReviewScreen() {
   const showReasons = useMemo(() => decision === 'no' || decision === 'maybe', [decision]);
 
   const onToggleReason = (r: RegretReason) => {
-    setReasons((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
+    setReasons((prev) => {
+      const next = prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r];
+      if (r === 'other' && !next.includes('other')) {
+        setOtherReason('');
+      }
+      return next;
+    });
   };
 
   const onNext = () => {
@@ -62,6 +72,19 @@ export default function ReviewScreen() {
   };
 
   const onBack = () => setStep((s) => (s === 1 ? 1 : ((s - 1) as Step)));
+
+  const onMemoKeyPress = (e: any) => {
+    if (Platform.OS !== 'web') return;
+    if (e?.nativeEvent?.key !== 'Enter') return;
+
+    const hasShift = Boolean(e?.nativeEvent?.shiftKey);
+    if (hasShift) return; // Shift+Enter: 줄바꿈 허용
+
+    e?.preventDefault?.();
+    if (canSubmit && !saving) {
+      void onSubmit();
+    }
+  };
 
   const onSubmit = async () => {
     if (!canSubmit) {
@@ -93,9 +116,17 @@ export default function ReviewScreen() {
         reviewedAt: new Date(),
       });
 
-      Alert.alert('완료', '리뷰가 저장됐어요. 인사이트에 반영됩니다.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      if (decision === 'no' || rating <= 2) {
+        const tips = [
+          '다음엔 주문 전에 "지금 배고픔 점수(1~5)"를 먼저 체크해 보세요.',
+          '가격이 아쉬웠다면, 다음엔 같은 메뉴를 2개 앱에서 10초만 비교해 보세요.',
+          '맛/양이 아쉬웠다면, 다음엔 소용량 또는 검증된 메뉴로 실험 폭을 줄여 보세요.',
+        ];
+        const tip = tips[Math.floor(Math.random() * tips.length)];
+        Alert.alert('학습 포인트', tip, [{ text: '확인', onPress: () => router.replace('/(tabs)') }]);
+        return;
+      }
+      router.replace('/(tabs)');
     } catch (e) {
       console.error('[review] submit failed', e);
       Alert.alert('저장 실패', '리뷰를 저장하지 못했어요. 네트워크를 확인해 주세요.');
@@ -119,7 +150,7 @@ export default function ReviewScreen() {
             try {
               setSkipping(true);
               await scheduleService.markAsSkipped(scheduleId);
-              router.back();
+              router.replace('/(tabs)');
             } catch (e) {
               console.error('[review] skip failed', e);
               const code = e instanceof FirebaseError ? e.code : '';
@@ -138,12 +169,30 @@ export default function ReviewScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <KeyboardAvoidingView
+      style={[styles.root, { paddingTop: insets.top, backgroundColor: colors.bg }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
+      <ScrollView
+        style={[styles.container, { backgroundColor: colors.bg }]}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.headerRow}>
-          <Text style={styles.h1}>리뷰</Text>
+          <Pressable
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
+            style={styles.headerBackBtn}
+            accessibilityRole="button"
+            accessibilityLabel="뒤로가기"
+          >
+            <Text style={[styles.headerBackText, { color: colors.primary }]}>{'<'} 뒤로</Text>
+          </Pressable>
+          <Text style={[styles.h1, { color: colors.text }]}>리뷰</Text>
           <Pressable onPress={onSkip} disabled={skipping}>
-            <Text style={[styles.skipText, skipping && styles.skipTextDisabled]}>스킵</Text>
+            <Text style={[styles.skipText, { color: colors.textSec }, skipping && styles.skipTextDisabled]}>
+              스킵
+            </Text>
           </Pressable>
         </View>
 
@@ -166,7 +215,10 @@ export default function ReviewScreen() {
                 return (
                   <Pressable
                     key={d.key}
-                    onPress={() => setDecision(d.key)}
+                    onPress={() => {
+                      setDecision(d.key);
+                      setStep(2);
+                    }}
                     style={[styles.choice, active && styles.choiceActive]}
                   >
                     <Text style={styles.choiceEmoji}>{d.emoji}</Text>
@@ -188,7 +240,13 @@ export default function ReviewScreen() {
             <View style={{ height: 18 }} />
 
             <View style={{ alignItems: 'center', gap: 10 }}>
-              <StarRating value={rating} onChange={setRating} />
+              <StarRating
+                value={rating}
+                onChange={(value) => {
+                  setRating(value);
+                  setStep(3);
+                }}
+              />
               <Text style={styles.ratingText}>
                 {rating === 0 ? '선택해 주세요' : `${rating} / 5`}
               </Text>
@@ -242,7 +300,9 @@ export default function ReviewScreen() {
                 placeholder="예: 배고파서 충동적으로 시켰는데 맛은 그냥 그랬다"
                 style={styles.memo}
                 multiline
+                onKeyPress={onMemoKeyPress}
               />
+              <Text style={styles.memoHint}>Enter로 저장, Shift+Enter로 줄바꿈</Text>
             </AppCard>
           </View>
         )}
@@ -275,7 +335,7 @@ export default function ReviewScreen() {
           />
         )}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -288,11 +348,13 @@ function StepPill({ active, label }: { active: boolean; label: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f5f5f5' },
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  root: { flex: 1 },
+  container: { flex: 1 },
   content: { padding: 16, paddingBottom: 20, gap: 16 },
   h1: { fontSize: 18, fontWeight: '900', color: '#111827' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerBackBtn: { minWidth: 56 },
+  headerBackText: { fontWeight: '800', color: '#4A90E2' },
   skipText: { fontWeight: '800', color: '#6B7280' },
   skipTextDisabled: { opacity: 0.5 },
 
@@ -355,6 +417,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#111827',
     textAlignVertical: 'top',
+  },
+  memoHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
   },
 
   bottomBar: {

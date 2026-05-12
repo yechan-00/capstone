@@ -31,6 +31,7 @@ import { scanResultToFormPatch, type ScanFormPatch } from '@/services/expenseInp
 import { parsePastedExpenseText } from '@/services/expenseInput/fromPastedText';
 import { uploadExpenseImage } from '@/services/storageService';
 import { scheduleRiskAwarenessAfterExpense } from '@/services/riskSpendingNotification';
+import { useTheme } from '@/theme/ThemeContext';
 
 const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
 
@@ -38,6 +39,7 @@ export default function AddExpenseScreen() {
   const router = useRouter();
   const { user, account } = useAuth();
   const { createExpense, updateExpense } = useExpenses();
+  const { colors } = useTheme();
   const amountRef = useRef<TextInput>(null);
 
   const [amountText, setAmountText] = useState('');
@@ -60,6 +62,7 @@ export default function AddExpenseScreen() {
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteBuffer, setPasteBuffer] = useState('');
+  const reviewDelayDays = Array.isArray(account?.reviewDelayDays) ? account!.reviewDelayDays : [account?.reviewDelayDays ?? 3].filter(Boolean) as any;
 
   const applyScanFormPatch = (patch: ScanFormPatch): string[] => {
     const updates: string[] = [];
@@ -214,6 +217,37 @@ export default function AddExpenseScreen() {
     setShowDatePicker(false);
   };
 
+  const webDateValue = (() => {
+    const y = tempSpentAt.getFullYear();
+    const m = String(tempSpentAt.getMonth() + 1).padStart(2, '0');
+    const d = String(tempSpentAt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  })();
+
+  const webTimeValue = (() => {
+    const h = String(tempSpentAt.getHours()).padStart(2, '0');
+    const m = String(tempSpentAt.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  })();
+
+  const handleWebDateChange = (value: string) => {
+    if (!value) return;
+    const [y, m, d] = value.split('-').map((v) => Number(v));
+    if ([y, m, d].some((v) => Number.isNaN(v))) return;
+    const next = new Date(tempSpentAt);
+    next.setFullYear(y, m - 1, d);
+    setTempSpentAt(next);
+  };
+
+  const handleWebTimeChange = (value: string) => {
+    if (!value) return;
+    const [h, m] = value.split(':').map((v) => Number(v));
+    if ([h, m].some((v) => Number.isNaN(v))) return;
+    const next = new Date(tempSpentAt);
+    next.setHours(h, m, 0, 0);
+    setTempSpentAt(next);
+  };
+
   const formatDateTime = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -286,9 +320,7 @@ export default function AddExpenseScreen() {
         }
       }
 
-      Alert.alert('저장됨', '식후 감상은 지금 한 줄로 남겨 두면 좋아요.\n3일 뒤(설정 시각)에 리뷰 알림이 잡혀요.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      router.replace('/(tabs)');
     } catch (e) {
       console.error('[expense] create failed', e);
       Alert.alert('저장 실패', `저장하지 못했어요. 오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
@@ -298,47 +330,51 @@ export default function AddExpenseScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.bg }]} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
-        style={styles.root}
+        style={[styles.root, { backgroundColor: colors.bg }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
       <ScrollView
         keyboardShouldPersistTaps="handled"
-        style={styles.container}
+        style={[styles.container, { backgroundColor: colors.bg }]}
         contentContainerStyle={styles.content}
       >
-        <AppCard style={{ paddingVertical: 12, backgroundColor: '#F0F7FF', borderColor: '#BFDBFE' }}>
-          <Text style={styles.timingTitle}>식사·간식을 마친 뒤에 기록해 주세요</Text>
-          <Text style={styles.timingBody}>
+        <AppCard style={{ paddingVertical: 12, backgroundColor: colors.surfaceMuted, borderColor: colors.border }}>
+          <Text style={[styles.timingTitle, { color: colors.text }]}>식사·간식을 마친 뒤에 기록해 주세요</Text>
+          <Text style={[styles.timingBody, { color: colors.textSec }]}>
             후회·만족은 보통 소비 직후나 잠시 지나야 드러나요. 가능하면 한 끼(또는 간식)가 끝난 뒤, 차분할 때
             적어 주세요.
           </Text>
         </AppCard>
 
         <View style={styles.headerRow}>
-          <Text style={styles.h1}>소비 추가</Text>
+          <Text style={[styles.h1, { color: colors.text }]}>소비 추가</Text>
           <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
             <Pressable
               style={[styles.scanButton, scanning && { opacity: 0.6 }]}
               onPress={handleScanPress}
               disabled={scanning}
+              accessibilityRole="button"
+              accessibilityLabel="영수증 스캔"
             >
               {scanning ? (
-                <ActivityIndicator size="small" color="#2563EB" />
+                <ActivityIndicator size="small" color={colors.primary} />
               ) : (
-                <Text style={styles.scanButtonText}>📷 스캔</Text>
+                <Text style={[styles.scanButtonText, { color: colors.primary }]}>📷 스캔</Text>
               )}
             </Pressable>
-            <Pressable style={styles.pasteButton} onPress={openPasteModal}>
-              <Text style={styles.pasteButtonText}>📋 붙여넣기</Text>
+            <Pressable style={styles.pasteButton} onPress={openPasteModal} accessibilityRole="button" accessibilityLabel="문자 붙여넣기">
+              <Text style={[styles.pasteButtonText, { color: colors.textSec }]}>📋 붙여넣기</Text>
             </Pressable>
             <Pressable
               style={styles.closeButton}
               onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
             >
-              <Text style={styles.closeButtonText}>닫기</Text>
+              <Text style={[styles.closeButtonText, { color: colors.primary }]}>닫기</Text>
             </Pressable>
           </View>
         </View>
@@ -408,9 +444,56 @@ export default function AddExpenseScreen() {
           </View>
         </AppCard>
 
-        {showDatePicker && (
-          <Modal transparent animationType="slide">
+        {showDatePicker && Platform.OS === 'web' && (
+          <View style={styles.webDatePanel}>
+            <View style={styles.datePickerHeader}>
+              <Pressable onPress={handleDatePickerCancel}>
+                <Text style={styles.datePickerCancel}>취소</Text>
+              </Pressable>
+              <Text style={styles.datePickerTitle}>날짜 및 시간 선택</Text>
+              <Pressable onPress={handleDatePickerConfirm}>
+                <Text style={styles.datePickerConfirm}>완료</Text>
+              </Pressable>
+            </View>
+            <View style={styles.webDateTimeWrap}>
+              <Text style={styles.webDateTimeLabel}>날짜</Text>
+              {React.createElement('input', {
+                type: 'date',
+                value: webDateValue,
+                onChange: (e: any) => handleWebDateChange(e?.target?.value ?? ''),
+                style: {
+                  height: 40,
+                  borderRadius: 10,
+                  border: '1px solid #D1D5DB',
+                  padding: '0 10px',
+                  fontSize: 14,
+                  color: '#111827',
+                  background: '#fff',
+                },
+              })}
+              <Text style={[styles.webDateTimeLabel, { marginTop: 12 }]}>시간</Text>
+              {React.createElement('input', {
+                type: 'time',
+                value: webTimeValue,
+                onChange: (e: any) => handleWebTimeChange(e?.target?.value ?? ''),
+                style: {
+                  height: 40,
+                  borderRadius: 10,
+                  border: '1px solid #D1D5DB',
+                  padding: '0 10px',
+                  fontSize: 14,
+                  color: '#111827',
+                  background: '#fff',
+                },
+              })}
+            </View>
+          </View>
+        )}
+
+        {showDatePicker && Platform.OS !== 'web' && (
+          <Modal transparent animationType="slide" onRequestClose={handleDatePickerCancel}>
             <View style={styles.datePickerContainer}>
+              <Pressable style={styles.datePickerBackdrop} onPress={handleDatePickerCancel} />
               <View style={styles.datePickerContent}>
                 <View style={styles.datePickerHeader}>
                   <Pressable onPress={handleDatePickerCancel}>
@@ -604,12 +687,13 @@ export default function AddExpenseScreen() {
             {item.trim() ? `  ${item.trim()}` : ''}
           </Text>
           <Text style={styles.bottomSub}>저장하면 3일 뒤 리뷰 알림이 잡혀요 (시각은 설정에서)</Text>
+          <Text style={styles.bottomSub}>현재 리뷰 주기: D+{reviewDelayDays.join(', ')}</Text>
         </View>
 
         <PrimaryButton
           label={saving ? '저장 중...' : '저장'}
           onPress={onSave}
-          disabled={!canSave || saving}
+          disabled={saving}
           style={{ width: 120 }}
         />
       </View>
@@ -640,10 +724,10 @@ function toKoreanMoney(v: number) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f5f5f5' },
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  root: { flex: 1 },
+  container: { flex: 1 },
   content: { padding: 16, paddingBottom: 20, gap: 16 },
-  h1: { fontSize: 18, fontWeight: '900', color: '#111827' },
+  h1: { fontSize: 18, fontWeight: '900' },
 
   label: { fontSize: 13, fontWeight: '900', color: '#6B7280', marginBottom: 8 },
   amountInput: {
@@ -661,8 +745,8 @@ const styles = StyleSheet.create({
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '900', color: '#111827' },
   sectionTitleSmall: { fontSize: 14, fontWeight: '900', color: '#6B7280' },
-  timingTitle: { fontWeight: '900', color: '#1E3A5F', fontSize: 15, marginBottom: 6 },
-  timingBody: { color: '#334155', fontWeight: '600', fontSize: 13, lineHeight: 20 },
+  timingTitle: { fontWeight: '900', fontSize: 15, marginBottom: 6 },
+  timingBody: { fontWeight: '600', fontSize: 13, lineHeight: 20 },
   fieldHint: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
 
   categoryRowCompact: {
@@ -887,6 +971,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
+  datePickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
   datePickerContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
@@ -916,5 +1003,23 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#2563EB',
     fontSize: 14,
+  },
+  webDateTimeWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  webDateTimeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    marginBottom: 6,
+  },
+  webDatePanel: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
   },
 });

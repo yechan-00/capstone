@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { useInsights } from "@/hooks/useInsights";
 import { ErrorRetryCard } from "@/components/ErrorRetryCard";
 import { toUserMessage } from "@/utils/error";
@@ -16,9 +16,9 @@ import { KeyFindingCard } from "@/components/KeyFindingCard";
 import { TopListSection } from "@/components/TopListSection";
 import { makePatternCopy } from "@/utils/insightsCopy";
 import { useTheme } from "@/theme/ThemeContext";
+import { InsightChartPlaceholder } from "@/components/InsightChartPlaceholder";
 
 export default function InsightsScreen() {
-  const router = useRouter();
   const { colors } = useTheme();
   const { insights, loading, error, refresh } = useInsights(30);
 
@@ -179,6 +179,9 @@ export default function InsightsScreen() {
     total: insights.totalExpenses,
     regretCount: insights.totalRegrets,
   });
+  const repeatedWarning = [...categoryItems, ...timeItems]
+    .filter((item) => item.totalCount >= 3 && item.regretRatePercent >= 60)
+    .sort((a, b) => b.regretRatePercent - a.regretRatePercent)[0];
 
   return (
     <ScrollView
@@ -194,13 +197,16 @@ export default function InsightsScreen() {
           desc={`후회율 ${(regretRate * 100).toFixed(1)}% · 후회 소비 ${insights.totalRegrets}건 / 전체 ${insights.totalExpenses}건`}
         />
         <KeyFindingCard title="패턴" desc={patternCopy} />
+        {repeatedWarning ? (
+          <KeyFindingCard
+            title="반복 패턴 경고"
+            desc={`"${repeatedWarning.label}" 구간에서 후회율이 ${repeatedWarning.regretRatePercent.toFixed(1)}%로 높아요. 다음 소비 전 이 구간 체크가 필요해요.`}
+          />
+        ) : null}
       </View>
 
       {isLowData && (
-        <DataQualityCard
-          count={insights.totalExpenses}
-          onAddExpense={() => router.push("/add-expense")}
-        />
+        <DataQualityCard count={insights.totalExpenses} />
       )}
 
       <View style={styles.summary}>
@@ -221,8 +227,11 @@ export default function InsightsScreen() {
       </View>
 
       <TopListSection title="카테고리별 후회율" items={categoryItems} />
+      <InsightChartPlaceholder data={insights.categoryInsights} type="category" />
       <TopListSection title="기분별 후회율" items={moodItems} />
+      <InsightChartPlaceholder data={insights.moodInsights} type="mood" />
       <TopListSection title="시간대별 후회율" items={timeItems} />
+      <InsightChartPlaceholder data={insights.timeOfDayInsights} type="timeOfDay" />
     </ScrollView>
   );
 }

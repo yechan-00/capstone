@@ -11,6 +11,12 @@ export interface Account {
   reviewReminderTime?: string;
   /** 리뷰 푸시 알림 사용 여부 (기본 true) */
   reviewReminderEnabled?: boolean;
+  /**
+   * 리뷰 알림 기준 일수(복수 선택).
+   * 예: [1,3,7,30]. 비어있으면 기본 [3].
+   * (이전 버전의 단일값(3|7|30)도 마이그레이션을 위해 허용)
+   */
+  reviewDelayDays?: (1 | 3 | 7 | 30)[] | 3 | 7 | 30;
   /** 사용자가 선택한 통화 기준 월 수입(정수). 인사이트에서는 toMonthlyIncomeKrw()로 원화 환산 */
   monthlyIncomeAmount?: number;
   monthlyIncomeCurrency?: 'KRW' | 'USD';
