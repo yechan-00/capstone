@@ -1,4 +1,3 @@
-import { subDays } from 'date-fns';
 import { expenseService } from './expenseService';
 import { reviewService } from './reviewService';
 import {
@@ -10,15 +9,50 @@ import {
   CategoryInsight,
   MoodInsight,
   TimeOfDayInsight,
+  type IncomeInsight,
+  type InsightsWindow,
 } from '@/lib/types';
+
+function buildIncomeInsight(
+  totalSpendKrw: number,
+  monthlyIncomeKrw: number,
+  window: InsightsWindow,
+): IncomeInsight | null {
+  if (monthlyIncomeKrw <= 0) return null;
+  const budgetKrw = window.mode === 'year' ? monthlyIncomeKrw * 12 : monthlyIncomeKrw;
+  const spendRatioPercent = budgetKrw > 0 ? (totalSpendKrw / budgetKrw) * 100 : 0;
+  const remainingKrw = budgetKrw - totalSpendKrw;
+  return {
+    monthlyIncomeKrw,
+    budgetKrw,
+    totalSpendKrw,
+    spendRatioPercent,
+    remainingKrw,
+    isOverBudget: remainingKrw < 0,
+  };
+}
 import { getTimeOfDay } from '@/utils/time';
-import { isDeliveryOrTakeout } from '@/lib/categoryAnalytics';
+
+function boundsForInsightsWindow(w: InsightsWindow): { start: Date; end: Date } {
+  if (w.mode === 'year') {
+    return {
+      start: new Date(w.year, 0, 1, 0, 0, 0, 0),
+      end: new Date(w.year, 11, 31, 23, 59, 59, 999),
+    };
+  }
+  const start = new Date(w.year, w.monthIndex, 1, 0, 0, 0, 0);
+  const end = new Date(w.year, w.monthIndex + 1, 0, 23, 59, 59, 999);
+  return { start, end };
+}
 
 export const insightsService = {
-  async getInsights(accountId: string, days: number = 30): Promise<Insights> {
+  async getInsights(
+    accountId: string,
+    window: InsightsWindow,
+    monthlyIncomeKrw = 0,
+  ): Promise<Insights> {
     try {
-      const endDate = new Date();
-      const startDate = subDays(endDate, days);
+      const { start: startDate, end: endDate } = boundsForInsightsWindow(window);
 
       const withTimeout = async <T>(promise: Promise<T>, ms: number, label: string) => {
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -54,6 +88,12 @@ export const insightsService = {
 
     const expenseMap = new Map(periodExpenses.map((e) => [e.id, e]));
 
+    const weekdayExpenseCounts = [0, 0, 0, 0, 0, 0, 0];
+    for (const e of periodExpenses) {
+      const d = e.spentAt.getDay();
+      weekdayExpenseCounts[d] += 1;
+    }
+
     // 카테고리별 인사이트
     const categoryInsights = this.calculateCategoryInsights(
       periodExpenses,
@@ -75,37 +115,33 @@ export const insightsService = {
       expenseMap
     );
 
+    const totalSpendKrw = periodExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const incomeInsight = buildIncomeInsight(totalSpendKrw, monthlyIncomeKrw, window);
+
     // 패턴 분석
     const patterns = this.generatePatterns(
       categoryInsights,
-      moodInsights,
-      timeOfDayInsights,
       periodExpenses.length,
-      regretReviews.length
+      regretReviews.length,
+      incomeInsight,
+      window.mode,
     );
-
-      const dtTotal = periodExpenses.filter((e) => isDeliveryOrTakeout(e.category)).length;
-      const dtRegret = regretReviews.filter((r) => {
-        const e = expenseMap.get(r.expenseId);
-        return e && isDeliveryOrTakeout(e.category);
-      }).length;
-      if (dtTotal >= 3 && dtRegret / dtTotal > 0.35) {
-        patterns.push(
-          `배달·외식(포장)을 합쳐 보면, 후회 비율이 ${((dtRegret / dtTotal) * 100).toFixed(1)}%로 나타나요.`
-        );
-      }
 
       return {
         period: { start: startDate, end: endDate },
+        periodMode: window.mode,
         categoryInsights,
         moodInsights,
         timeOfDayInsights,
+        weekdayExpenseCounts,
         totalExpenses: periodExpenses.length,
+        totalSpendKrw,
         totalRegrets: regretReviews.length,
         overallRegretRate:
           periodExpenses.length > 0
             ? (regretReviews.length / periodExpenses.length) * 100
             : 0,
+        incomeInsight,
         patterns,
       };
     } catch (error: any) {
@@ -218,35 +254,33 @@ export const insightsService = {
 
   generatePatterns(
     categoryInsights: CategoryInsight[],
-    moodInsights: MoodInsight[],
-    timeOfDayInsights: TimeOfDayInsight[],
     totalExpenses: number,
-    totalRegrets: number
+    totalRegrets: number,
+    incomeInsight: IncomeInsight | null,
+    periodMode: 'month' | 'year',
   ): string[] {
     const patterns: string[] = [];
 
+    if (incomeInsight && incomeInsight.totalSpendKrw > 0) {
+      const pct = incomeInsight.spendRatioPercent;
+      const periodKo = periodMode === 'year' ? '올해' : '이번 달';
+      if (incomeInsight.isOverBudget) {
+        patterns.push(
+          `${periodKo} 소비가 설정 수입의 ${pct.toFixed(0)}%로, 예산을 ${Math.abs(incomeInsight.remainingKrw).toLocaleString()}원 넘었어요.`,
+        );
+      } else if (pct >= 70) {
+        patterns.push(`${periodKo} 소비가 월 수입 기준 예산의 ${pct.toFixed(0)}%에 달했어요.`);
+      } else if (pct >= 40) {
+        patterns.push(`${periodKo} 소비율은 약 ${pct.toFixed(0)}%예요. 수입 대비 여유가 ${incomeInsight.remainingKrw.toLocaleString()}원 남았어요.`);
+      }
+    }
+
     if (totalExpenses === 0) {
-      return ['아직 기록된 소비가 없습니다.'];
+      return patterns.slice(0, 2);
     }
 
     const regretRate = (totalRegrets / totalExpenses) * 100;
 
-    // 전체 후회율 패턴 (중립 톤)
-    if (regretRate > 50) {
-      patterns.push(
-        `현재 데이터 기준, 전체 소비의 ${regretRate.toFixed(1)}%가 후회로 기록되어 있어요.`
-      );
-    } else if (regretRate > 30) {
-      patterns.push(
-        `현재 데이터 기준, 전체 소비의 ${regretRate.toFixed(1)}%가 후회로 기록되어 있어요.`
-      );
-    } else {
-      patterns.push(
-        `현재 데이터 기준, 후회율은 ${regretRate.toFixed(1)}%입니다.`
-      );
-    }
-
-    // 카테고리별 패턴
     const topRegretCategory = categoryInsights
       .filter((c) => c.totalCount >= 3)
       .sort((a, b) => b.regretRate - a.regretRate)[0];
@@ -256,31 +290,14 @@ export const insightsService = {
         takeout: '외식(포장)',
         delivery: '배달',
         cafe: '카페',
+        food: '외식(포장)',
       };
       const label = catKo[topRegretCategory.category] ?? topRegretCategory.category;
-      patterns.push(
-        `현재 데이터 기준, "${label}" 카테고리의 후회율이 ${topRegretCategory.regretRate.toFixed(1)}%로 높게 나타나요.`
-      );
+      patterns.push(`"${label}"에서 후회 비율이 ${topRegretCategory.regretRate.toFixed(0)}%예요.`);
+    } else if (regretRate >= 35) {
+      patterns.push(`기간 내 후회 비율이 ${regretRate.toFixed(0)}%입니다.`);
     }
 
-    // 시간대별 패턴
-    const topRegretTime = timeOfDayInsights
-      .filter((t) => t.totalCount >= 3)
-      .sort((a, b) => b.regretRate - a.regretRate)[0];
-
-    if (topRegretTime && topRegretTime.regretRate > 40) {
-      const timeLabel = {
-        morning: '아침',
-        afternoon: '점심',
-        evening: '저녁',
-        night: '밤',
-      }[topRegretTime.timeOfDay];
-
-      patterns.push(
-        `현재 데이터 기준, "${timeLabel}" 시간대의 후회율이 ${topRegretTime.regretRate.toFixed(1)}%로 나타나요.`
-      );
-    }
-
-    return patterns.length > 0 ? patterns : ['패턴을 분석하기에는 데이터가 부족합니다.'];
+    return patterns.slice(0, 2);
   },
 };

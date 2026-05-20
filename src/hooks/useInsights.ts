@@ -1,15 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Insights } from '@/lib/types';
+import type { Insights, InsightsWindow } from '@/lib/types';
+import { toMonthlyIncomeKrw } from '@/lib/accountSettings';
 import { insightsService } from '@/services/insightsService';
 import { useAuth } from './useAuth';
 
-export const useInsights = (days: number = 30) => {
+function windowForMode(periodMode: 'month' | 'year'): InsightsWindow {
+  const now = new Date();
+  if (periodMode === 'year') {
+    return { mode: 'year', year: now.getFullYear() };
+  }
+  return { mode: 'month', year: now.getFullYear(), monthIndex: now.getMonth() };
+}
+
+export const useInsights = (periodMode: 'month' | 'year') => {
   const { account } = useAuth();
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
   const loadInFlightRef = useRef(false);
+  const prevModeRef = useRef(periodMode);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -17,6 +27,13 @@ export const useInsights = (days: number = 30) => {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (prevModeRef.current !== periodMode) {
+      setInsights(null);
+      prevModeRef.current = periodMode;
+    }
+  }, [periodMode]);
 
   const loadInsights = useCallback(async () => {
     if (!account) return;
@@ -26,7 +43,9 @@ export const useInsights = (days: number = 30) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await insightsService.getInsights(account.id, days);
+      const w = windowForMode(periodMode);
+      const monthlyIncomeKrw = toMonthlyIncomeKrw(account);
+      const data = await insightsService.getInsights(account.id, w, monthlyIncomeKrw);
       if (mountedRef.current) {
         setInsights(data);
       }
@@ -40,7 +59,7 @@ export const useInsights = (days: number = 30) => {
         setLoading(false);
       }
     }
-  }, [account, days]);
+  }, [account, periodMode]);
 
   useEffect(() => {
     if (!account) {
@@ -50,7 +69,7 @@ export const useInsights = (days: number = 30) => {
     }
 
     loadInsights();
-  }, [account, days, loadInsights]);
+  }, [account, loadInsights]);
 
   return {
     insights,

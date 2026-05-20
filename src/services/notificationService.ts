@@ -1,4 +1,8 @@
 import * as Notifications from "expo-notifications";
+import {
+  cancelScheduledNotificationAsync,
+  getAllScheduledNotificationsAsync,
+} from "expo-notifications";
 import { Platform } from "react-native";
 import { addDays } from "date-fns";
 
@@ -127,4 +131,31 @@ export async function cancelReminder(notificationId: string): Promise<void> {
   }
 
   await Notifications.cancelScheduledNotificationAsync(notificationId);
+}
+
+/** 트리거 시각이 이미 지난 예약 알림 제거(잔여 스케줄 정리) */
+export async function cancelStaleScheduledDateNotifications(): Promise<void> {
+  if (Platform.OS === "web") {
+    return;
+  }
+  try {
+    const list = await getAllScheduledNotificationsAsync();
+    const now = Date.now();
+    for (const req of list) {
+      const trigger = req.trigger as { type?: string; date?: Date | number } | undefined;
+      if (!trigger || trigger.type !== "date" || trigger.date == null) continue;
+      const raw = trigger.date;
+      const ts =
+        raw instanceof Date
+          ? raw.getTime()
+          : typeof raw === "number"
+            ? raw
+            : new Date(String(raw)).getTime();
+      if (Number.isFinite(ts) && ts < now - 30_000) {
+        await cancelScheduledNotificationAsync(req.identifier);
+      }
+    }
+  } catch (e) {
+    console.warn("[notifications] cancelStaleScheduledDateNotifications", e);
+  }
 }

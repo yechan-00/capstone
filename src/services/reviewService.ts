@@ -13,11 +13,15 @@ import {
 import { db } from '@/lib/firebase';
 import { Review } from '@/lib/types';
 import { timestampToDate } from '@/utils/firestore';
+import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
 import { cancelReminder } from '@/services/notificationService';
 import { scheduleService } from '@/services/scheduleService';
 
 const COLLECTION_NAME = 'reviews';
 const SCHEDULES_COLLECTION = 'review_schedules';
+
+/** Firestore `in` 쿼리 최대 10개 */
+const EXPENSE_ID_IN_CHUNK = 10;
 
 export const reviewService = {
   async create(review: Omit<Review, 'id' | 'createdAt'>): Promise<string> {
@@ -99,11 +103,56 @@ export const reviewService = {
           ...data,
           reviewedAt: timestampToDate(data.reviewedAt),
           createdAt: timestampToDate(data.createdAt),
+          satisfaction: normalizeReviewSatisfaction(data.satisfaction),
         } as Review;
       });
     } catch (error) {
       console.error('Failed to get reviews:', error);
       throw new Error('리뷰를 조회하는데 실패했습니다.');
+    }
+  },
+
+  /**
+   * 지출 ID 목록에 대해, 각 지출당 가장 최근 리뷰 1건씩만 반환합니다.
+   * (월별 캘린더 등에서 N+1 조회를 피할 때 사용)
+   */
+  async getLatestByExpenseIds(accountId: string, expenseIds: string[]): Promise<Map<string, Review>> {
+    const unique = [...new Set(expenseIds.filter((id) => typeof id === 'string' && id.length > 0))];
+    const result = new Map<string, Review>();
+
+    if (unique.length === 0) {
+      return result;
+    }
+
+    try {
+      for (let i = 0; i < unique.length; i += EXPENSE_ID_IN_CHUNK) {
+        const chunk = unique.slice(i, i + EXPENSE_ID_IN_CHUNK);
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('expenseId', 'in', chunk)
+        );
+        const snapshot = await getDocs(q);
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          const review = {
+            id: docSnap.id,
+            ...data,
+            reviewedAt: timestampToDate(data.reviewedAt),
+            createdAt: timestampToDate(data.createdAt),
+            satisfaction: normalizeReviewSatisfaction(data.satisfaction),
+          } as Review;
+          const eid = review.expenseId;
+          const prev = result.get(eid);
+          if (!prev || review.reviewedAt.getTime() > prev.reviewedAt.getTime()) {
+            result.set(eid, review);
+          }
+        }
+      }
+      return result;
+    } catch (error) {
+      console.error('Failed to get reviews by expense ids:', error);
+      throw new Error('지출별 리뷰를 조회하는데 실패했습니다.');
     }
   },
 
@@ -123,6 +172,7 @@ export const reviewService = {
           ...data,
           reviewedAt: timestampToDate(data.reviewedAt),
           createdAt: timestampToDate(data.createdAt),
+          satisfaction: normalizeReviewSatisfaction(data.satisfaction),
         } as Review;
       });
 

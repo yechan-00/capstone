@@ -105,7 +105,7 @@ export interface Review {
   reviewerUserId: string;
   reviewType: ReviewType;
   decisionAgain: DecisionAgain;
-  satisfaction: number; // 1-5
+  satisfaction: number; // 1 매우불만족 ~ 5 매우만족
   regretReasons: RegretReason[];
   otherReason?: string;
   notes?: string;
@@ -155,16 +155,37 @@ export interface TimeOfDayInsight {
   regretRate: number;
 }
 
+export type InsightsWindow =
+  | { mode: 'month'; year: number; monthIndex: number }
+  | { mode: 'year'; year: number };
+
+/** 설정된 월 수입 대비 기간 소비 요약 (원화 기준) */
+export interface IncomeInsight {
+  monthlyIncomeKrw: number;
+  /** month: 월 수입, year: 월 수입 × 12 */
+  budgetKrw: number;
+  totalSpendKrw: number;
+  spendRatioPercent: number;
+  remainingKrw: number;
+  isOverBudget: boolean;
+}
+
 export interface Insights {
   period: {
     start: Date;
     end: Date;
   };
+  periodMode: 'month' | 'year';
   categoryInsights: CategoryInsight[];
   moodInsights: MoodInsight[];
   timeOfDayInsights: TimeOfDayInsight[];
+  /** spentAt 기준 요일별 소비 건수. 인덱스 0=일 … 6=토 (Date.getDay) */
+  weekdayExpenseCounts: number[];
   totalExpenses: number;
+  totalSpendKrw: number;
   totalRegrets: number;
   overallRegretRate: number;
-  patterns: string[]; // 템플릿 문장들
+  /** 월 수입 미설정 시 null */
+  incomeInsight: IncomeInsight | null;
+  patterns: string[];
 }

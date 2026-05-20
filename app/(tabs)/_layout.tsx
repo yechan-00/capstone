@@ -1,46 +1,87 @@
 import { Tabs, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '@/theme/ThemeContext';
 
-function AddTabButton({ onPress, labelColor }: { onPress: () => void; labelColor: string }) {
+function AddTabButton({ onPress, fabColor, labelColor }: { onPress: () => void; fabColor: string; labelColor: string }) {
   return (
     <Pressable style={styles.addTabButton} onPress={onPress}>
-      <View style={styles.addTabInner}>
-        <MaterialIcons name="add" size={34} color="#fff" />
+      <View style={[styles.addTabInner, { backgroundColor: fabColor }]}>
+        <MaterialIcons name="add" size={32} color="#fff" />
       </View>
       <Text style={[styles.addTabLabel, { color: labelColor }]}>추가</Text>
     </Pressable>
   );
 }
 
+function TabHeaderBackground({
+  isDark,
+  gradientStart,
+  gradientEnd,
+  solid,
+}: {
+  isDark: boolean;
+  gradientStart: string;
+  gradientEnd: string;
+  solid: string;
+}) {
+  if (isDark) {
+    return (
+      <LinearGradient
+        colors={[gradientStart, gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+    );
+  }
+  return <View style={[StyleSheet.absoluteFill, { backgroundColor: solid }]} />;
+}
+
 export default function TabsLayout() {
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+
+  const headerTitleColor = isDark ? colors.headerTint : colors.onPrimary;
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: true,
-        tabBarActiveTintColor: colors.tabActive,
-        tabBarInactiveTintColor: colors.tabInactive,
-        tabBarStyle: {
-          height: 78,
-          paddingBottom: 8,
-          paddingTop: 6,
-          backgroundColor: colors.tabBarBg,
-          borderTopColor: colors.tabBarBorder,
-        },
-        tabBarLabelStyle: styles.tabLabel,
-        headerStyle: { backgroundColor: colors.headerBg },
-        headerTintColor: colors.headerTint,
-        headerShadowVisible: false,
-      }}
-    >
+    <>
+      <StatusBar style="light" />
+      <Tabs
+        screenOptions={{
+          headerShown: true,
+          tabBarActiveTintColor: colors.tabActive,
+          tabBarInactiveTintColor: colors.tabInactive,
+          tabBarStyle: {
+            height: 76,
+            paddingBottom: 10,
+            paddingTop: 8,
+            backgroundColor: colors.tabBarBg,
+            borderTopColor: colors.tabBarBorder,
+            borderTopWidth: StyleSheet.hairlineWidth,
+          },
+          tabBarLabelStyle: styles.tabLabel,
+          headerStyle: { backgroundColor: 'transparent' },
+          headerBackground: () => (
+            <TabHeaderBackground
+              isDark={isDark}
+              gradientStart={colors.headerGradientStart}
+              gradientEnd={colors.headerGradientEnd}
+              solid={colors.accentCta}
+            />
+          ),
+          headerTintColor: headerTitleColor,
+          headerTitleStyle: { color: headerTitleColor, fontWeight: '800', fontSize: 17 },
+          headerShadowVisible: false,
+        }}
+      >
       <Tabs.Screen
         name="index"
         options={{
-          title: '홈',
+          title: '후회가계부',
+          tabBarLabel: '홈',
           tabBarIcon: ({ color, size }) => <MaterialIcons name="home" size={size} color={color} />,
         }}
       />
@@ -59,6 +100,7 @@ export default function TabsLayout() {
           tabBarButton: () => (
             <AddTabButton
               onPress={() => router.push('/add-expense')}
+              fabColor={colors.accentCta}
               labelColor={colors.addTabLabel}
             />
           ),
@@ -78,7 +120,8 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <MaterialIcons name="settings" size={size} color={color} />,
         }}
       />
-    </Tabs>
+      </Tabs>
+    </>
   );
 }
 
@@ -86,12 +129,17 @@ const styles = StyleSheet.create({
   tabLabel: { fontSize: 11, fontWeight: '700' },
   addTabButton: { alignItems: 'center', justifyContent: 'center' },
   addTabInner: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: '#1F4FD6',
-    alignItems: 'center', justifyContent: 'center',
-    marginTop: -22,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28, shadowRadius: 14, elevation: 10,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -18,
+    shadowColor: '#1a2d4a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 8,
   },
   addTabLabel: { marginTop: 2, fontSize: 11, fontWeight: '700' },
 });

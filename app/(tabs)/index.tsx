@@ -18,12 +18,14 @@ import { ReviewActionCard } from '@/components/ReviewActionCard';
 import { ReviewStatusCard } from '@/components/ReviewStatusCard';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
 import { expenseService } from '@/services/expenseService';
-import { ensureNotificationPermission } from '@/services/notificationService';
+import { reviewService } from '@/services/reviewService';
+import { ensureNotificationPermission, cancelStaleScheduledDateNotifications } from '@/services/notificationService';
 import { scheduleService } from '@/services/scheduleService';
 import { getDaysUntil } from '@/utils/time';
 import { toUserMessage } from '@/utils/error';
+import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
 import { useTheme } from '@/theme/ThemeContext';
-import type { Expense, ExpenseCategory, ScheduleType } from '@/lib/types';
+import type { Expense, ExpenseCategory, Review, ReviewSchedule, ScheduleType } from '@/lib/types';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -51,10 +53,8 @@ export default function HomeScreen() {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const calendarRows = React.useMemo(
-    () => Math.ceil(buildCalendarCells(currentMonth).length / 7),
-    [currentMonth]
-  );
+  const calendarCells = React.useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
+  const calendarRows = React.useMemo(() => Math.ceil(calendarCells.length / 7), [calendarCells]);
   const calendarCellHeight = React.useMemo(() => {
     if (!isWeb) return isCompact ? 56 : 72;
     const reservedHeight = isCompact ? 340 : 380;
@@ -66,6 +66,12 @@ export default function HomeScreen() {
   const [reviewCollapsed, setReviewCollapsed] = React.useState(isCompact);
   /** 이번 달 소비 정산 카드만 접기 (캘린더는 항상 표시) */
   const [monthBreakdownCollapsed, setMonthBreakdownCollapsed] = React.useState(false);
+  /** 지출 ID → 해당 지출의 가장 최근 리뷰 (캘린더 감성 색) */
+  const [reviewsByExpenseId, setReviewsByExpenseId] = React.useState<Map<string, Review>>(() => new Map());
+  /** 지출 ID → 해당 지출의 가장 이른 pending 리뷰 스케줄 (평가하기 이동용) */
+  const [pendingScheduleByExpenseId, setPendingScheduleByExpenseId] = React.useState<
+    Map<string, ReviewSchedule>
+  >(() => new Map());
   const lastFocusRefreshAtRef = React.useRef(0);
   const pendingBusyRef = React.useRef(false);
   const monthBusyRef = React.useRef(false);
@@ -81,7 +87,20 @@ export default function HomeScreen() {
     }
     return map;
   }, [expenses]);
-  const detailDayExpenses = detailDayKey ? expenseMapByDay.get(detailDayKey) ?? [] : [];
+
+  const sortedExpensesByDayKey = React.useMemo(() => {
+    const out = new Map<string, Expense[]>();
+    expenseMapByDay.forEach((raw, k) => {
+      out.set(k, sortExpensesForCalendarCells(raw, reviewsByExpenseId));
+    });
+    return out;
+  }, [expenseMapByDay, reviewsByExpenseId]);
+
+  const detailDayExpenses = React.useMemo(() => {
+    if (!detailDayKey) return [];
+    return sortedExpensesByDayKey.get(detailDayKey) ?? [];
+  }, [detailDayKey, sortedExpensesByDayKey]);
+
   const monthCategoryTotals = React.useMemo(() => summarizeMonthByCategory(expenses), [expenses]);
   const monthTotalAmount = monthCategoryTotals.total;
   const activeDaysCount = expenseMapByDay.size;
@@ -99,6 +118,8 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!account) {
       setExpenses([]);
+      setReviewsByExpenseId(new Map());
+      setPendingScheduleByExpenseId(new Map());
       setLoading(false);
       setError(null);
       setPendingLoading(false);
@@ -110,6 +131,33 @@ export default function HomeScreen() {
     void loadMonthExpenses(false);
     void loadPendingReview(false);
   }, [account, currentMonth]);
+
+  /** 날짜 모달을 열 때 해당 날 지출의 최신 리뷰를 다시 읽어 캘린더와 동일한 감성 배경이 적용되게 함 */
+  React.useEffect(() => {
+    if (!account?.id || !detailDayKey) return;
+    const list = expenseMapByDay.get(detailDayKey);
+    if (!list?.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fresh = await reviewService.getLatestByExpenseIds(
+          account.id,
+          list.map((e) => e.id),
+        );
+        if (cancelled) return;
+        setReviewsByExpenseId((prev) => {
+          const next = new Map(prev);
+          fresh.forEach((rev, expenseId) => next.set(expenseId, rev));
+          return next;
+        });
+      } catch {
+        /* 기존 맵 유지 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailDayKey, account?.id, expenseMapByDay]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -134,10 +182,27 @@ export default function HomeScreen() {
       const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59, 999);
       const data = await expenseService.getByAccountIdInRange(account.id, start, end);
       setExpenses(data);
+      try {
+        const revMap = await reviewService.getLatestByExpenseIds(
+          account.id,
+          data.map((e) => e.id)
+        );
+        setReviewsByExpenseId(revMap);
+        const pendMap = await scheduleService.getEarliestPendingScheduleByExpenseIds(
+          account.id,
+          data.map((e) => e.id)
+        );
+        setPendingScheduleByExpenseId(pendMap);
+      } catch {
+        setReviewsByExpenseId(new Map());
+        setPendingScheduleByExpenseId(new Map());
+      }
       return data;
     } catch (err) {
       const e = err instanceof Error ? err : new Error('소비 목록을 불러오는데 실패했습니다.');
       setError(e);
+      setReviewsByExpenseId(new Map());
+      setPendingScheduleByExpenseId(new Map());
       return undefined;
     } finally {
       if (!silent) setLoading(false);
@@ -152,6 +217,8 @@ export default function HomeScreen() {
     try {
       if (!silent) setPendingLoading(true);
       setPendingError(null);
+      await scheduleService.clearExpiredReviewReminderNotifications(account.id);
+      await cancelStaleScheduledDateNotifications();
       const pendingSchedules = await scheduleService.getPendingSchedules(account.id);
       if (pendingSchedules.length > 0) {
         const schedule = pendingSchedules[0];
@@ -184,6 +251,11 @@ export default function HomeScreen() {
 
   const handleReviewPress = async (schedule: { id: string; expenseId: string }) => {
     router.push({ pathname: '/review', params: { expenseId: schedule.expenseId, scheduleId: schedule.id } });
+  };
+
+  const openReviewForExpense = (expenseId: string, scheduleId: string) => {
+    setDetailDayKey(null);
+    router.push({ pathname: '/review', params: { expenseId, scheduleId } });
   };
 
   const handleExpensePress = (expenseId: string) => {
@@ -222,7 +294,7 @@ export default function HomeScreen() {
   if (authLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#4A90E2" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -230,6 +302,19 @@ export default function HomeScreen() {
   if (!user || !account) {
     return null;
   }
+
+  const todayKey = toDayKey(new Date());
+
+  const cardElev =
+    !isDark && Platform.OS !== 'web'
+      ? {
+          shadowColor: '#1a2d4a',
+          shadowOffset: { width: 0, height: 5 },
+          shadowOpacity: 0.07,
+          shadowRadius: 14,
+          elevation: 4,
+        }
+      : {};
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -239,47 +324,55 @@ export default function HomeScreen() {
         </View>
       )}
       <View style={styles.reviewSection}>
-        <View style={styles.reviewHeaderRow}>
-          <Text style={[styles.reviewHeaderTitle, { color: colors.text }]}>리뷰 알림</Text>
-          <Pressable onPress={() => setReviewCollapsed((v) => !v)}>
-            <Text style={[styles.reviewToggleText, { color: colors.primary }]}>
+        <View style={[styles.reviewCardOuter, { backgroundColor: colors.surface, borderColor: colors.border }, cardElev]}>
+          <Pressable
+            onPress={() => setReviewCollapsed((v) => !v)}
+            style={styles.reviewCardHeader}
+            accessibilityRole="button"
+            accessibilityLabel={reviewCollapsed ? '리뷰 알림 펼치기' : '리뷰 알림 접기'}
+          >
+            <View style={[styles.reviewBellWrap, { backgroundColor: isDark ? colors.surfaceMuted : '#FFF8E6' }]}>
+              <MaterialIcons name="notifications-none" size={20} color={isDark ? '#fbbf24' : '#d97706'} />
+            </View>
+            <Text style={[styles.reviewCardHeadTitle, { color: colors.text }]}>리뷰 알림</Text>
+            <View style={styles.reviewHeaderSpacer} />
+            <Text style={[styles.reviewExpandLabel, { color: colors.textMuted }]}>
               {reviewCollapsed ? '펼치기' : '접기'}
             </Text>
+            <MaterialIcons
+              name={reviewCollapsed ? 'expand-more' : 'expand-less'}
+              size={22}
+              color={colors.textMuted}
+            />
           </Pressable>
+          {!reviewCollapsed ? (
+            <View style={[styles.reviewCardBody, { borderTopColor: colors.border }]}>
+              {pendingLoading ? (
+                pendingItem ? (
+                  <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
+                ) : (
+                  <ReviewStatusCard nextDueInDays={undefined} notificationsEnabled />
+                )
+              ) : pendingError ? (
+                <ErrorRetryCard
+                  title="평가 목록을 불러오지 못했어요"
+                  desc={toUserMessage(pendingError)}
+                  onRetry={() => {
+                    void loadPendingReview(false);
+                  }}
+                />
+              ) : pendingItem ? (
+                <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
+              ) : (
+                <ReviewStatusCard nextDueInDays={nextDueInDays} notificationsEnabled />
+              )}
+            </View>
+          ) : null}
         </View>
-        {reviewCollapsed ? (
-          <View style={[styles.reviewCollapsedCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.reviewCollapsedText, { color: colors.textSec }]}>
-              {pendingItem
-                ? '평가할 리뷰 1건이 있어요'
-                : nextDueInDays == null
-                  ? '예정된 리뷰가 없어요'
-                  : `다음 리뷰 D-${nextDueInDays}`}
-            </Text>
-          </View>
-        ) : pendingLoading ? (
-          pendingItem ? (
-            <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
-          ) : (
-            <ReviewStatusCard nextDueInDays={undefined} notificationsEnabled />
-          )
-        ) : pendingError ? (
-          <ErrorRetryCard
-            title="평가 목록을 불러오지 못했어요"
-            desc={toUserMessage(pendingError)}
-            onRetry={() => {
-              void loadPendingReview(false);
-            }}
-          />
-        ) : pendingItem ? (
-          <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
-        ) : (
-          <ReviewStatusCard nextDueInDays={nextDueInDays} notificationsEnabled />
-        )}
       </View>
 
       <View style={styles.spendingHeader}>
-        <Text style={[styles.spendingHeaderTitle, { color: colors.text }]}>소비 내역</Text>
+        <Text style={[styles.spendingHeaderTitle, { color: colors.textSec }]}>이번 달 요약</Text>
       </View>
       <ScrollView contentContainerStyle={[styles.list, isCompact && styles.listCompact]}>
         <View
@@ -287,6 +380,7 @@ export default function HomeScreen() {
             styles.breakdownCard,
             isCompact && styles.breakdownCardCompact,
             { backgroundColor: colors.surface, borderColor: colors.border },
+            cardElev,
           ]}
         >
           <View style={styles.breakdownHeader}>
@@ -351,20 +445,30 @@ export default function HomeScreen() {
           style={[
             styles.calendarCard,
             isCompact && styles.calendarCardCompact,
-            { backgroundColor: colors.surface, borderColor: colors.border, maxWidth: calendarMaxWidth, alignSelf: 'center', width: '100%' },
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              maxWidth: calendarMaxWidth,
+              alignSelf: 'center',
+              width: '100%',
+            },
+            cardElev,
           ]}
         >
           <View style={styles.monthHeader}>
-            <Pressable onPress={() => {
-              setDetailDayKey(null);
-              setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-            }}>
-              <Text style={[styles.monthNav, { color: colors.primary }]}>{'‹'}</Text>
+            <Pressable
+              onPress={() => {
+                setDetailDayKey(null);
+                setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+              }}
+              hitSlop={8}
+            >
+              <MaterialIcons name="chevron-left" size={28} color={colors.primary} />
             </Pressable>
             <Text style={[styles.monthTitle, { color: colors.text }]}>{formatMonth(currentMonth)}</Text>
             <View style={styles.monthHeaderRight}>
               <Pressable
-                style={[styles.todayBtn, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
+                style={[styles.todayBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
                 onPress={() => {
                   const now = new Date();
                   setCurrentMonth(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -373,49 +477,102 @@ export default function HomeScreen() {
               >
                 <Text style={[styles.todayBtnText, { color: colors.textSec }]}>오늘</Text>
               </Pressable>
-              <Pressable onPress={() => {
-                setDetailDayKey(null);
-                setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-              }}>
-                <Text style={[styles.monthNav, { color: colors.primary }]}>{'›'}</Text>
+              <Pressable
+                onPress={() => {
+                  setDetailDayKey(null);
+                  setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+                }}
+                hitSlop={8}
+              >
+                <MaterialIcons name="chevron-right" size={28} color={colors.primary} />
               </Pressable>
             </View>
           </View>
           <View style={styles.weekRow}>
-            {['일', '월', '화', '수', '목', '금', '토'].map((w) => (
-              <Text key={w} style={[styles.weekText, { color: colors.textMuted }]}>{w}</Text>
+            {['일', '월', '화', '수', '목', '금', '토'].map((w, i) => (
+              <Text
+                key={w}
+                style={[
+                  styles.weekText,
+                  {
+                    color:
+                      i === 0 ? '#e11d48' : i === 6 ? '#2563eb' : colors.textSec,
+                  },
+                ]}
+              >
+                {w}
+              </Text>
             ))}
           </View>
           <View style={styles.grid}>
-            {buildCalendarCells(currentMonth).map((cell, idx) => {
-              if (!cell) return <View key={`empty-${idx}`} style={styles.dayCell} />;
+            {calendarCells.map((cell, idx) => {
+              if (!cell) {
+                return <View key={`empty-${idx}`} style={[styles.dayCell, { minHeight: calendarCellHeight }]} />;
+              }
               const key = toDayKey(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), cell));
-              const dayExpenses = expenseMapByDay.get(key) ?? [];
+              const dayExpenses = sortedExpensesByDayKey.get(key) ?? [];
               const count = dayExpenses.length;
               const active = detailDayKey === key;
-              const today = key === toDayKey(new Date());
+              const today = key === todayKey;
               const previewCount = isCompact ? 1 : 2;
+              const dow = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), cell).getDay();
+              const isSun = dow === 0;
+              const isSat = dow === 6;
               return (
                 <Pressable
                   key={key}
-                  style={[
-                    styles.dayCell,
-                    { minHeight: calendarCellHeight },
-                    isCompact && styles.dayCellCompact,
-                    active && { backgroundColor: colors.choiceActiveBg, borderRadius: 10, borderColor: colors.primary },
-                    today && !active && { borderWidth: 1, borderColor: colors.primary, borderRadius: 10 },
-                  ]}
+                  style={[styles.dayCell, { minHeight: calendarCellHeight }, isCompact && styles.dayCellCompact]}
                   onPress={() => setDetailDayKey(key)}
                 >
-                  <Text style={[styles.dayNum, isCompact && styles.dayNumCompact, { color: colors.text }]}>{cell}</Text>
+                  <View
+                    style={[
+                      styles.dayNumCircle,
+                      active && { backgroundColor: colors.primary },
+                      today && !active && { borderWidth: 2, borderColor: colors.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dayNum,
+                        isCompact && styles.dayNumCompact,
+                        active && { color: colors.onPrimary },
+                        !active && isSun && { color: '#e11d48' },
+                        !active && isSat && { color: '#2563eb' },
+                        !active && !isSun && !isSat && { color: colors.text },
+                      ]}
+                    >
+                      {cell}
+                    </Text>
+                  </View>
                   <View style={styles.dayEvents}>
-                    {dayExpenses.slice(0, previewCount).map((expense) => (
-                      <View key={expense.id} style={[styles.eventPill, { backgroundColor: colors.choiceBg }]}>
-                        <Text style={[styles.eventPillText, { color: colors.primary }]} numberOfLines={2}>
-                          {formatExpenseCalendarLabel(expense)}
-                        </Text>
-                      </View>
-                    ))}
+                    {dayExpenses.slice(0, previewCount).map((expense) => {
+                      const review = reviewsByExpenseId.get(expense.id);
+                      const surf = review ? reviewSentimentSurface(review, isDark) : null;
+                      const chipText = formatCalendarAmountChip(Number(expense.amount) || 0);
+                      return (
+                        <View
+                          key={expense.id}
+                          style={[
+                            styles.eventPill,
+                            {
+                              backgroundColor: surf?.bg ?? colors.surfaceMuted,
+                              borderWidth: StyleSheet.hairlineWidth,
+                              borderColor: surf?.border ?? colors.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.eventPillText,
+                              { color: surf ? surf.text : colors.textSec },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {chipText}
+                          </Text>
+                        </View>
+                      );
+                    })}
                     {count > previewCount ? (
                       <Text style={[styles.morePillText, { color: colors.textMuted }]}>+{count - previewCount}</Text>
                     ) : null}
@@ -483,12 +640,44 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-                  {detailDayExpenses.map((item, index) => (
+                  {(() => {
+                    const reviewDueCutoffMs = Date.now();
+                    return detailDayExpenses.map((item, index) => {
+                    const itemReview = reviewsByExpenseId.get(item.id);
+                    const pendingSched = pendingScheduleByExpenseId.get(item.id);
+                    const canStartReview =
+                      !itemReview &&
+                      pendingSched != null &&
+                      pendingSched.dueAt.getTime() <= reviewDueCutoffMs;
+                    const surf = itemReview ? reviewSentimentSurface(itemReview, isDark) : null;
+                    return (
                     <View key={item.id}>
                       {index > 0 ? <View style={[styles.modalBlockDivider, { backgroundColor: colors.border }]} /> : null}
-                      <Pressable onPress={() => handleExpensePress(item.id)}>
+                      <View
+                        style={[
+                          styles.modalExpenseBlock,
+                          surf
+                            ? {
+                                backgroundColor: surf.bg,
+                                borderWidth: StyleSheet.hairlineWidth,
+                                borderColor: surf.border,
+                              }
+                            : { backgroundColor: colors.surfaceMuted },
+                        ]}
+                      >
+                      <Pressable
+                        onPress={() => handleExpensePress(item.id)}
+                        style={({ pressed }) => [{ backgroundColor: 'transparent', opacity: pressed ? 0.88 : 1 }]}
+                      >
                         <View style={styles.modalEventTitleRow}>
-                          <View style={[styles.modalDot, { backgroundColor: categoryAccent(item.category) }]} />
+                          <View
+                            style={[
+                              styles.modalDot,
+                              {
+                                backgroundColor: surf?.dot ?? categoryAccent(item.category),
+                              },
+                            ]}
+                          />
                           <Text style={[styles.modalEventTitle, { color: colors.text }]} numberOfLines={2}>
                             {(item.item ?? item.content ?? item.reason ?? '소비').trim()}
                           </Text>
@@ -521,6 +710,14 @@ export default function HomeScreen() {
                       ) : null}
 
                       <View style={styles.modalActions}>
+                        {canStartReview ? (
+                          <Pressable
+                            onPress={() => openReviewForExpense(item.id, pendingSched.id)}
+                            style={[styles.modalGhostBtn, { borderColor: colors.primary, backgroundColor: colors.choiceActiveBg }]}
+                          >
+                            <Text style={[styles.modalGhostBtnText, { color: colors.primary }]}>평가하기</Text>
+                          </Pressable>
+                        ) : null}
                         <Pressable
                           onPress={() => handleExpensePress(item.id)}
                           style={[styles.modalGhostBtn, { borderColor: colors.border }]}
@@ -534,8 +731,11 @@ export default function HomeScreen() {
                           <Text style={[styles.modalGhostBtnText, { color: colors.logoutText }]}>삭제</Text>
                         </Pressable>
                       </View>
+                      </View>
                     </View>
-                  ))}
+                    );
+                  });
+                  })()}
                 </ScrollView>
               )}
             </View>
@@ -551,6 +751,28 @@ function toDayKey(date: Date) {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/** 같은 날 여러 건일 때 리뷰가 있는 지출이 캘린더 미리보기(1~2줄)에 먼저 오도록 */
+function sortExpensesForCalendarCells(day: Expense[], reviewsByExpenseId: Map<string, Review>): Expense[] {
+  const toneRank = (r: Review) => {
+    const t = sentimentFromDecision(r);
+    if (t === 'negative') return 0;
+    if (t === 'neutral') return 1;
+    return 2;
+  };
+  return [...day].sort((a, b) => {
+    const hasA = reviewsByExpenseId.has(a.id);
+    const hasB = reviewsByExpenseId.has(b.id);
+    if (hasA !== hasB) return hasA ? -1 : 1;
+    if (hasA && hasB) {
+      const ra = reviewsByExpenseId.get(a.id)!;
+      const rb = reviewsByExpenseId.get(b.id)!;
+      const diff = toneRank(ra) - toneRank(rb);
+      if (diff !== 0) return diff;
+    }
+    return b.spentAt.getTime() - a.spentAt.getTime();
+  });
 }
 
 /** 이번 달 지출을 외식(포장)·배달·카페로 합산 (레거시 food는 포장 외식에 포함) */
@@ -622,9 +844,95 @@ function categoryAccent(category: ExpenseCategory): string {
   }
 }
 
-function formatExpenseCalendarLabel(expense: Expense): string {
-  const amount = Number(expense.amount) || 0;
-  return `${amount.toLocaleString()}원, ${expenseCategoryLine(expense.category)}`;
+function formatCalendarAmountChip(amount: number): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n < 10000) {
+    const cheon = Math.round(n / 1000);
+    return `${cheon <= 0 ? 1 : cheon}천`;
+  }
+  const man = n / 10000;
+  const rounded = Math.round(man * 10) / 10;
+  if (rounded === Math.floor(rounded)) return `${Math.floor(rounded)}만`;
+  return `${rounded}만`;
+}
+
+type ReviewSentiment = 'positive' | 'negative' | 'neutral';
+
+/**
+ * 캘린더·모달 색. `reviewService`가 Firestore 값을 `normalizeReviewSatisfaction`으로 숫자화하므로
+ * 기존 리뷰(문자열 satisfaction, Long 등)도 1~5면 그대로 4~5 초록·3 노랑·1~2 빨강.
+ * satisfaction이 없거나 파싱 불가면 `decisionAgain`(yes/maybe/no)으로 동일 3단 톤 폴백.
+ */
+function sentimentFromDecision(review: Review): ReviewSentiment {
+  const s = normalizeReviewSatisfaction(review.satisfaction);
+  if (Number.isFinite(s) && s >= 1 && s <= 5) {
+    if (s >= 4) return 'positive';
+    if (s === 3) return 'neutral';
+    return 'negative';
+  }
+  switch (review.decisionAgain) {
+    case 'yes':
+      return 'positive';
+    case 'no':
+      return 'negative';
+    case 'maybe':
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
+
+/** 모달·목록에서 감성 점(만족/보통/불만족) 표시용 — 캘린더 pill과 동일 기준 */
+function sentimentMarkerColor(review: Review, isDark: boolean): string {
+  const tone = sentimentFromDecision(review);
+  if (isDark) {
+    if (tone === 'positive') return '#4ade80';
+    if (tone === 'negative') return '#fb7185';
+    return '#facc15';
+  }
+  if (tone === 'positive') return '#16a34a';
+  if (tone === 'negative') return '#dc2626';
+  return '#ca8a04';
+}
+
+const REVIEW_CALENDAR_TEXT_ON_DARK_PILL = '#f8fafc';
+
+/** 리뷰 완료 항목: 긍정·부정·보통은 배경만 구분 (다크는 불투명 배경으로 빨강도 확실히) */
+function reviewSentimentColors(review: Review, isDark: boolean): { bg: string; text: string } {
+  const tone = sentimentFromDecision(review);
+  if (isDark) {
+    switch (tone) {
+      case 'positive':
+        return { bg: '#14532d', text: REVIEW_CALENDAR_TEXT_ON_DARK_PILL };
+      case 'negative':
+        return { bg: '#9f1239', text: '#fecdd3' };
+      case 'neutral':
+      default:
+        return { bg: '#713f12', text: '#fef9c3' };
+    }
+  }
+  switch (tone) {
+    case 'positive':
+      return { bg: '#E3F4EA', text: '#166534' };
+    case 'negative':
+      return { bg: '#FDE8E8', text: '#b91c1c' };
+    case 'neutral':
+    default:
+      return { bg: '#FEF6D8', text: '#92400e' };
+  }
+}
+
+function reviewSentimentSurface(review: Review, isDark: boolean): {
+  bg: string;
+  text: string;
+  dot: string;
+  border: string;
+} {
+  const base = reviewSentimentColors(review, isDark);
+  const dot = sentimentMarkerColor(review, isDark);
+  const border = isDark ? 'rgba(248, 250, 252, 0.22)' : 'rgba(15, 23, 42, 0.12)';
+  return { bg: base.bg, text: base.text, dot, border };
 }
 
 function buildCalendarCells(currentMonth: Date): Array<number | null> {
@@ -651,29 +959,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 6,
+    paddingTop: 10,
+    paddingBottom: 4,
   },
-  spendingHeaderTitle: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  spendingHeaderTitle: { fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
   reviewSection: {
-    marginTop: 16,
+    marginTop: 12,
     marginHorizontal: 16,
   },
-  reviewHeaderRow: {
+  reviewCardOuter: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  reviewCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    gap: 10,
   },
-  reviewHeaderTitle: { fontSize: 13, fontWeight: '800' },
-  reviewToggleText: { fontSize: 12, fontWeight: '800' },
-  reviewCollapsedCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
+  reviewBellWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCardHeadTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
+  reviewHeaderSpacer: { flex: 1 },
+  reviewExpandLabel: { fontSize: 13, fontWeight: '700' },
+  reviewCardBody: {
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
+    paddingBottom: 14,
+    paddingTop: 12,
   },
-  reviewCollapsedText: { fontSize: 13, fontWeight: '700' },
   list: {
     padding: 16,
     paddingBottom: 120,
@@ -685,7 +1005,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   calendarCard: {
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
     padding: 12,
   },
@@ -699,44 +1019,52 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  monthHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  monthHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   todayBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   todayBtnText: { fontSize: 11, fontWeight: '700' },
-  monthNav: { fontSize: 24, fontWeight: '700', paddingHorizontal: 10 },
-  monthTitle: { fontSize: 16, fontWeight: '900' },
+  monthTitle: { fontSize: 17, fontWeight: '800', letterSpacing: -0.3 },
   weekRow: {
     flexDirection: 'row',
     marginBottom: 4,
   },
-  weekText: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700' },
+  weekText: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '800' },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   dayCell: {
     width: '14.285%',
-    borderWidth: 0.5,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+    alignItems: 'center',
+    paddingHorizontal: 2,
+    paddingVertical: 6,
   },
   dayCellCompact: {
-    paddingHorizontal: 3,
-    paddingVertical: 3,
+    paddingHorizontal: 1,
+    paddingVertical: 4,
   },
-  dayNum: { fontSize: 13, fontWeight: '800', marginBottom: 3, alignSelf: 'flex-start' },
+  dayNumCircle: {
+    minWidth: 32,
+    minHeight: 32,
+    paddingHorizontal: 6,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayNum: { fontSize: 13, fontWeight: '800' },
   dayNumCompact: { fontSize: 12 },
-  dayEvents: { gap: 2, width: '100%' },
+  dayEvents: { gap: 3, width: '100%', alignItems: 'center', marginTop: 4 },
   eventPill: {
-    borderRadius: 8,
+    borderRadius: 6,
     paddingHorizontal: 5,
     paddingVertical: 2,
+    maxWidth: '100%',
   },
   eventPillText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: -0.2,
   },
   morePillText: {
     fontSize: 10,
@@ -744,7 +1072,7 @@ const styles = StyleSheet.create({
     paddingLeft: 2,
   },
   breakdownCard: {
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -900,6 +1228,12 @@ const styles = StyleSheet.create({
   modalBlockDivider: {
     height: StyleSheet.hairlineWidth,
     marginVertical: 14,
+  },
+  modalExpenseBlock: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
   },
   modalEventTitleRow: {
     flexDirection: 'row',

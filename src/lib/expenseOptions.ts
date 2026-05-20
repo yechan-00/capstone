@@ -17,74 +17,22 @@ const pickerKeySet = new Set<CategoryKey>(CATEGORY_KEYS_SHOWN_IN_PICKER);
 
 export const CATEGORIES_FOR_PICKER = CATEGORIES.filter((c) => pickerKeySet.has(c.key));
 
-export const REASON_GROUPS = [
-  {
-    title: '🔥 감정 기반',
-    items: [
-      '스트레스 받아서',
-      '기분이 좋아서',
-      '우울해서',
-      '보상 심리',
-      '외로워서',
-      '충동적으로',
-    ] as const,
-  },
-  {
-    title: '🍔 상황 기반',
-    items: [
-      '배고파서',
-      '시간이 없어서',
-      '귀찮아서',
-      '약속/모임 때문에',
-      '늦은 시간이라서',
-      '집에 음식이 없어서',
-    ] as const,
-  },
-  {
-    title: '🧠 합리화',
-    items: [
-      '이 정도는 괜찮지',
-      '할인해서',
-      '배송비 아까워서 더 삼',
-      '어차피 살 거였음',
-      '오늘만 특별히',
-      '스트레스 해소 필요',
-    ] as const,
-  },
-  {
-    title: '🧲 외부 유혹',
-    items: [
-      '광고 보고',
-      '추천/알고리즘 때문에',
-      'SNS 보고',
-      '친구/지인 영향',
-      '리뷰 보고',
-    ] as const,
-  },
-  {
-    title: '📦 습관성 소비',
-    items: [
-      '습관적으로',
-      '그냥 항상 하던 거라',
-      '생각 없이',
-      '자동 결제',
-    ] as const,
-  },
-  {
-    title: '💥 기타',
-    items: [
-      '지금 안 사면 불안해서',
-      '무료배송 맞추려고',
-      '소량보다 더 싸서',
-      '이미 돈 쓴 김에',
-      '할인 끝날까봐',
-      '기타',
-    ] as const,
-  },
+/** 소비 추가용: 빠른 선택만 (자세한 말은 아래 자유 입력). */
+export const ADD_EXPENSE_QUICK_REASONS = [
+  '배고파서',
+  '스트레스·피로',
+  '기분 전환·보상',
+  '시간 없음·귀찮음',
+  '사람들과',
+  '충동·습관',
+  '할인·혜택',
+  '기타',
 ] as const;
 
-export type Reason = (typeof REASON_GROUPS)[number]['items'][number];
-export const REASONS: readonly Reason[] = REASON_GROUPS.flatMap((group) => [...group.items]) as readonly Reason[];
+export const REASON_GROUPS = [{ title: '빠른 선택', items: ADD_EXPENSE_QUICK_REASONS }] as const;
+
+export type Reason = (typeof ADD_EXPENSE_QUICK_REASONS)[number];
+export const REASONS: readonly Reason[] = ADD_EXPENSE_QUICK_REASONS;
 
 export const MOODS = [
   { key: 'very good', label: '아주 좋음', emoji: '😊' },

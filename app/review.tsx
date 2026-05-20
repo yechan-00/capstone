@@ -13,26 +13,37 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialIcons } from '@expo/vector-icons';
 import { FirebaseError } from 'firebase/app';
 import { firstParam } from '@/utils/routerParams';
-import { AppCard } from '@/components/AppCard';
 import { Chip } from '@/components/Chip';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { StarRating } from '@/components/StarRating';
-import { REGRET_REASONS, REVIEW_DECISIONS } from '@/lib/reviewOptions';
+import { SatisfactionLevelPicker } from '@/components/SatisfactionLevelPicker';
+import { regretReasonsForReviewUi } from '@/lib/regretReasons';
+import { decisionAgainFromSatisfaction, needsRegretReasonsFlow } from '@/lib/reviewSatisfaction';
 import { reviewService } from '@/services/reviewService';
 import { scheduleService } from '@/services/scheduleService';
 import { useAuth } from '@/hooks/useAuth';
-import { DecisionAgain, RegretReason } from '@/lib/types';
+import { RegretReason } from '@/lib/types';
 import { useTheme } from '@/theme/ThemeContext';
 
-type Step = 1 | 2 | 3;
+const cardShadow = (isDark: boolean) =>
+  Platform.select({
+    ios: {
+      shadowColor: '#0c1220',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: isDark ? 0.45 : 0.06,
+      shadowRadius: 16,
+    },
+    android: { elevation: isDark ? 6 : 2 },
+    default: {},
+  });
 
 export default function ReviewScreen() {
   const router = useRouter();
   const { user, account } = useAuth();
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const rawParams = useLocalSearchParams<{
     expenseId?: string | string[];
     scheduleId?: string | string[];
@@ -40,20 +51,18 @@ export default function ReviewScreen() {
   const expenseId = firstParam(rawParams.expenseId);
   const scheduleId = firstParam(rawParams.scheduleId);
 
-  const [step, setStep] = useState<Step>(1);
-  const [decision, setDecision] = useState<DecisionAgain | null>(null);
+  const { primary: primaryRegretReasons, rest: restRegretReasons } = useMemo(() => regretReasonsForReviewUi(), []);
+
   const [rating, setRating] = useState<number>(0);
   const [reasons, setReasons] = useState<RegretReason[]>([]);
   const [otherReason, setOtherReason] = useState('');
   const [memo, setMemo] = useState('');
   const [saving, setSaving] = useState(false);
   const [skipping, setSkipping] = useState(false);
+  const [showAllRestReasons, setShowAllRestReasons] = useState(false);
 
-  const canNextStep1 = decision != null;
-  const canNextStep2 = rating >= 1;
-  const canSubmit = decision != null && rating >= 1;
-
-  const showReasons = useMemo(() => decision === 'no' || decision === 'maybe', [decision]);
+  const canSubmit = rating >= 1;
+  const showReasons = useMemo(() => needsRegretReasonsFlow(rating), [rating]);
 
   const onToggleReason = (r: RegretReason) => {
     setReasons((prev) => {
@@ -65,20 +74,12 @@ export default function ReviewScreen() {
     });
   };
 
-  const onNext = () => {
-    if (step === 1 && !canNextStep1) return;
-    if (step === 2 && !canNextStep2) return;
-    setStep((s) => (s === 3 ? 3 : ((s + 1) as Step)));
-  };
-
-  const onBack = () => setStep((s) => (s === 1 ? 1 : ((s - 1) as Step)));
-
   const onMemoKeyPress = (e: any) => {
     if (Platform.OS !== 'web') return;
     if (e?.nativeEvent?.key !== 'Enter') return;
 
     const hasShift = Boolean(e?.nativeEvent?.shiftKey);
-    if (hasShift) return; // Shift+Enter: 줄바꿈 허용
+    if (hasShift) return;
 
     e?.preventDefault?.();
     if (canSubmit && !saving) {
@@ -88,7 +89,7 @@ export default function ReviewScreen() {
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      Alert.alert('입력 확인', '결정과 만족도를 입력해 주세요.');
+      Alert.alert('입력 확인', '만족도를 선택해 주세요.');
       return;
     }
     if (!expenseId || !scheduleId || !user || !account) {
@@ -106,17 +107,18 @@ export default function ReviewScreen() {
         accountId: account.id,
         reviewerUserId: user.uid,
         reviewType: 'self',
-        decisionAgain: decision,
+        decisionAgain: decisionAgainFromSatisfaction(rating),
         satisfaction: rating,
         regretReasons: showReasons ? reasons : [],
-        otherReason: showReasons && reasons.includes('other') && otherReason.trim()
-          ? otherReason.trim()
-          : undefined,
+        otherReason:
+          showReasons && reasons.includes('other') && otherReason.trim()
+            ? otherReason.trim()
+            : undefined,
         notes: memo.trim() || undefined,
         reviewedAt: new Date(),
       });
 
-      if (decision === 'no' || rating <= 2) {
+      if (rating <= 2) {
         const tips = [
           '다음엔 주문 전에 "지금 배고픔 점수(1~5)"를 먼저 체크해 보세요.',
           '가격이 아쉬웠다면, 다음엔 같은 메뉴를 2개 앱에서 10초만 비교해 보세요.',
@@ -176,274 +178,268 @@ export default function ReviewScreen() {
     >
       <ScrollView
         style={[styles.container, { backgroundColor: colors.bg }]}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: 24 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerRow}>
+        <View
+          style={[
+            styles.hero,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            cardShadow(isDark),
+          ]}
+        >
           <Pressable
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
-            style={styles.headerBackBtn}
+            style={({ pressed }) => [styles.heroIconBtn, { opacity: pressed ? 0.65 : 1 }]}
             accessibilityRole="button"
             accessibilityLabel="뒤로가기"
           >
-            <Text style={[styles.headerBackText, { color: colors.primary }]}>{'<'} 뒤로</Text>
+            <MaterialIcons name="arrow-back" size={24} color={colors.text} />
           </Pressable>
-          <Text style={[styles.h1, { color: colors.text }]}>리뷰</Text>
-          <Pressable onPress={onSkip} disabled={skipping}>
-            <Text style={[styles.skipText, { color: colors.textSec }, skipping && styles.skipTextDisabled]}>
-              스킵
+          <View style={styles.heroCenter}>
+            <Text style={[styles.heroTitle, { color: colors.text }]}>소비 리뷰</Text>
+            <Text style={[styles.heroSub, { color: colors.textSec }]}>잠깐만 남겨 두면 패턴이 보여요</Text>
+          </View>
+          <Pressable onPress={onSkip} disabled={skipping} style={styles.heroSkipWrap} hitSlop={8}>
+            <Text style={[styles.heroSkip, { color: colors.textMuted }, skipping && styles.skipDisabled]}>
+              건너뛰기
             </Text>
           </Pressable>
         </View>
 
-        <View style={styles.stepRow}>
-          <StepPill active={step === 1} label="1 결정" />
-          <StepPill active={step === 2} label="2 만족도" />
-          <StepPill active={step === 3} label="3 이유/메모" />
+        <View
+          style={[
+            styles.sheet,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            cardShadow(isDark),
+          ]}
+        >
+          <View style={[styles.sheetAccent, { backgroundColor: colors.primary }]} />
+          <View style={styles.sheetInner}>
+            <Text style={[styles.kicker, { color: colors.textMuted }]}>만족도</Text>
+            <Text style={[styles.blockTitle, { color: colors.text }]}>이번 소비는 어땠나요?</Text>
+            <Text style={[styles.blockDesc, { color: colors.textSec }]}>
+              위에서 아래로, 가장 가까운 쪽을 골라 주세요.
+            </Text>
+            <View style={{ height: 18 }} />
+            <SatisfactionLevelPicker value={rating} onChange={setRating} isDark={isDark} />
+          </View>
         </View>
 
-        {step === 1 && (
-          <AppCard>
-            <Text style={styles.title}>다시 선택한다면?</Text>
-            <Text style={styles.desc}>시간이 지난 지금 기준으로 평가해요.</Text>
+        <View
+          style={[
+            styles.sheet,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            cardShadow(isDark),
+          ]}
+        >
+          <View style={[styles.sheetAccentMuted, { backgroundColor: colors.textMuted }]} />
+          <View style={styles.sheetInner}>
+            <Text style={[styles.kicker, { color: colors.textMuted }]}>메모 · 이유</Text>
+            <Text style={[styles.blockTitle, { color: colors.text }]}>
+              {showReasons ? '아쉬웠던 점이 있나요?' : '추가로 남기고 싶은 말'}
+            </Text>
+            <Text style={[styles.blockDesc, { color: colors.textSec }]}>
+              {showReasons
+                ? '자주 고르는 이유만 보여요. 더 필요하면 펼칠 수 있어요.'
+                : '선택이에요. 적지 않아도 괜찮아요.'}
+            </Text>
 
-            <View style={{ height: 14 }} />
-
-            <View style={{ gap: 10 }}>
-              {REVIEW_DECISIONS.map((d) => {
-                const active = decision === d.key;
-                return (
-                  <Pressable
-                    key={d.key}
-                    onPress={() => {
-                      setDecision(d.key);
-                      setStep(2);
-                    }}
-                    style={[styles.choice, active && styles.choiceActive]}
-                  >
-                    <Text style={styles.choiceEmoji}>{d.emoji}</Text>
-                    <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
-                      {d.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </AppCard>
-        )}
-
-        {step === 2 && (
-          <AppCard>
-            <Text style={styles.title}>만족도는 어땠나요?</Text>
-            <Text style={styles.desc}>1점(별로) ~ 5점(만족)</Text>
-
-            <View style={{ height: 18 }} />
-
-            <View style={{ alignItems: 'center', gap: 10 }}>
-              <StarRating
-                value={rating}
-                onChange={(value) => {
-                  setRating(value);
-                  setStep(3);
-                }}
-              />
-              <Text style={styles.ratingText}>
-                {rating === 0 ? '선택해 주세요' : `${rating} / 5`}
-              </Text>
-            </View>
-          </AppCard>
-        )}
-
-        {step === 3 && (
-          <View style={{ gap: 16 }}>
-            <AppCard>
-              <Text style={styles.title}>이유를 남겨볼까요?</Text>
-              <Text style={styles.desc}>
-                {showReasons
-                  ? '후회/애매함의 이유를 선택하면 나중에 패턴이 더 잘 보여요.'
-                  : '선택사항이에요. 메모만 남겨도 좋아요.'}
-              </Text>
-
-              {showReasons && (
-                <>
-                  <View style={{ height: 14 }} />
-                  <View style={styles.chipWrap}>
-                    {REGRET_REASONS.map((r) => (
-                      <Chip
-                        key={r.key}
-                        label={r.label}
-                        active={reasons.includes(r.key)}
-                        onPress={() => onToggleReason(r.key)}
-                      />
-                    ))}
-                  </View>
-                  {reasons.includes('other') && (
-                    <TextInput
-                      value={otherReason}
-                      onChangeText={setOtherReason}
-                      placeholder="기타 이유를 직접 입력해 주세요"
-                      style={styles.otherInput}
-                      maxLength={100}
+            {showReasons && (
+              <>
+                <View style={{ height: 14 }} />
+                <View style={styles.chipWrap}>
+                  {primaryRegretReasons.map((r) => (
+                    <Chip
+                      key={r.key}
+                      label={r.label}
+                      active={reasons.includes(r.key)}
+                      onPress={() => onToggleReason(r.key)}
                     />
-                  )}
-                </>
-              )}
-            </AppCard>
+                  ))}
+                </View>
+                {restRegretReasons.length > 0 ? (
+                  <>
+                    <Pressable
+                      onPress={() => setShowAllRestReasons((v) => !v)}
+                      style={({ pressed }) => [
+                        styles.moreRow,
+                        { borderColor: colors.border, opacity: pressed ? 0.85 : 1 },
+                      ]}
+                    >
+                      <Text style={[styles.moreRowText, { color: colors.primary }]}>
+                        {showAllRestReasons ? '접기' : `다른 이유 ${restRegretReasons.length}개`}
+                      </Text>
+                      <MaterialIcons
+                        name={showAllRestReasons ? 'expand-less' : 'expand-more'}
+                        size={22}
+                        color={colors.primary}
+                      />
+                    </Pressable>
+                    {showAllRestReasons ? (
+                      <View style={[styles.chipWrap, { marginTop: 4 }]}>
+                        {restRegretReasons.map((r) => (
+                          <Chip
+                            key={r.key}
+                            label={r.label}
+                            active={reasons.includes(r.key)}
+                            onPress={() => onToggleReason(r.key)}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
+                {reasons.includes('other') && (
+                  <TextInput
+                    value={otherReason}
+                    onChangeText={setOtherReason}
+                    placeholder="기타 이유를 짧게"
+                    placeholderTextColor={colors.placeholder}
+                    style={[
+                      styles.textIn,
+                      {
+                        marginTop: 12,
+                        borderColor: colors.borderInput,
+                        backgroundColor: colors.inputBg,
+                        color: colors.text,
+                      },
+                    ]}
+                    maxLength={100}
+                  />
+                )}
+              </>
+            )}
 
-            <AppCard>
-              <Text style={styles.title}>메모</Text>
-              <Text style={styles.desc}>나중에 기억할 한 줄만 적어도 충분해요.</Text>
-              <View style={{ height: 10 }} />
-              <TextInput
-                value={memo}
-                onChangeText={setMemo}
-                placeholder="예: 배고파서 충동적으로 시켰는데 맛은 그냥 그랬다"
-                style={styles.memo}
-                multiline
-                onKeyPress={onMemoKeyPress}
-              />
-              <Text style={styles.memoHint}>Enter로 저장, Shift+Enter로 줄바꿈</Text>
-            </AppCard>
+            <View style={{ height: 16 }} />
+            <Text style={[styles.memoLabel, { color: colors.textSec }]}>한 줄 메모 (선택)</Text>
+            <TextInput
+              value={memo}
+              onChangeText={setMemo}
+              placeholder="예: 배고파서 시켰는데 생각보다 비쌌다"
+              placeholderTextColor={colors.placeholder}
+              style={[
+                styles.memo,
+                {
+                  borderColor: colors.borderInput,
+                  backgroundColor: colors.inputBg,
+                  color: colors.text,
+                },
+              ]}
+              multiline
+              onKeyPress={onMemoKeyPress}
+            />
+            {Platform.OS === 'web' ? (
+              <Text style={[styles.webHint, { color: colors.textMuted }]}>
+                Enter로 저장 · Shift+Enter로 줄바꿈
+              </Text>
+            ) : null}
           </View>
-        )}
+        </View>
 
-        <View style={{ height: 90 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        {step > 1 ? (
-          <Pressable onPress={onBack} style={styles.backBtn}>
-            <Text style={styles.backText}>이전</Text>
-          </Pressable>
-        ) : (
-          <View style={{ width: 70 }} />
-        )}
-
-        {step < 3 ? (
-          <PrimaryButton
-            label="다음"
-            onPress={onNext}
-            disabled={(step === 1 && !canNextStep1) || (step === 2 && !canNextStep2)}
-            style={{ flex: 1 }}
-          />
-        ) : (
-          <PrimaryButton
-            label={saving ? '저장 중...' : '완료'}
-            onPress={onSubmit}
-            disabled={!canSubmit || saving}
-            style={{ flex: 1 }}
-          />
-        )}
+      <View
+        style={[
+          styles.bottomBar,
+          {
+            borderTopColor: colors.border,
+            backgroundColor: colors.surface,
+            paddingBottom: Math.max(insets.bottom, 12),
+          },
+          cardShadow(isDark),
+        ]}
+      >
+        <PrimaryButton
+          label={saving ? '저장 중...' : '완료하고 닫기'}
+          onPress={onSubmit}
+          disabled={!canSubmit || saving}
+          style={{ flex: 1, height: 52, borderRadius: 14 }}
+        />
       </View>
     </KeyboardAvoidingView>
-  );
-}
-
-function StepPill({ active, label }: { active: boolean; label: string }) {
-  return (
-    <View style={[styles.pill, active && styles.pillActive]}>
-      <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   container: { flex: 1 },
-  content: { padding: 16, paddingBottom: 20, gap: 16 },
-  h1: { fontSize: 18, fontWeight: '900', color: '#111827' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerBackBtn: { minWidth: 56 },
-  headerBackText: { fontWeight: '800', color: '#4A90E2' },
-  skipText: { fontWeight: '800', color: '#6B7280' },
-  skipTextDisabled: { opacity: 0.5 },
+  content: { paddingHorizontal: 18, gap: 18 },
 
-  stepRow: { flexDirection: 'row', gap: 8 },
-  pill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  pillActive: { backgroundColor: '#E8F1FF', borderColor: '#BFDBFE' },
-  pillText: { fontWeight: '900', color: '#6B7280', fontSize: 12 },
-  pillTextActive: { color: '#1D4ED8' },
-
-  title: { fontSize: 16, fontWeight: '900', color: '#111827' },
-  desc: { marginTop: 8, color: '#6B7280', fontWeight: '700', lineHeight: 20 },
-
-  choice: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 14,
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    gap: 4,
   },
-  choiceActive: { backgroundColor: '#E8F1FF', borderColor: '#77A7FF' },
-  choiceEmoji: { fontSize: 18 },
-  choiceText: { fontWeight: '900', color: '#111827' },
-  choiceTextActive: { color: '#1D4ED8' },
+  heroIconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  heroCenter: { flex: 1, alignItems: 'center' },
+  heroTitle: { fontSize: 17, fontWeight: '900' },
+  heroSub: { marginTop: 3, fontSize: 12, fontWeight: '600' },
+  heroSkipWrap: { minWidth: 72, alignItems: 'flex-end', paddingRight: 4 },
+  heroSkip: { fontSize: 13, fontWeight: '800' },
+  skipDisabled: { opacity: 0.45 },
 
-  ratingText: { fontWeight: '900', color: '#111827' },
+  sheet: {
+    flexDirection: 'row',
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  sheetAccent: { width: 5 },
+  sheetAccentMuted: { width: 5, opacity: 0.85 },
+  sheetInner: { flex: 1, padding: 18 },
+  kicker: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+  blockTitle: { marginTop: 6, fontSize: 18, fontWeight: '900' },
+  blockDesc: { marginTop: 8, fontSize: 14, fontWeight: '600', lineHeight: 21 },
 
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
-  reasonGroupLabel: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 2 },
-  otherInput: {
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
+  moreRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#BFDBFE',
-    backgroundColor: '#F0F7FF',
+  },
+  moreRowText: { fontSize: 13, fontWeight: '800' },
+
+  textIn: {
+    borderRadius: 12,
+    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
-    marginTop: 4,
   },
-
+  memoLabel: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
   memo: {
-    minHeight: 110,
+    minHeight: 100,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: '#fff',
-    fontWeight: '800',
-    color: '#111827',
+    fontWeight: '700',
+    fontSize: 15,
+    lineHeight: 22,
     textAlignVertical: 'top',
   },
-  memoHint: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
+  webHint: { marginTop: 8, fontSize: 11, fontWeight: '600' },
 
   bottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  backBtn: {
-    width: 70,
-    height: 52,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  backText: { fontWeight: '900', color: '#111827' },
 });

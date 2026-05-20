@@ -18,11 +18,14 @@ import { useTheme } from '@/theme/ThemeContext';
 import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
 import { scheduleService } from '@/services/scheduleService';
-import { Expense, Review, ReviewSchedule, DecisionAgain, RegretReason } from '@/lib/types';
+import { Expense, Review, ReviewSchedule, RegretReason } from '@/lib/types';
 import { useAuth } from '@/hooks/useAuth';
-import { DECISION_AGAIN_OPTIONS, REGRET_REASONS, SATISFACTION_SCALE } from '@/lib/constants';
+import { SatisfactionLevelPicker } from '@/components/SatisfactionLevelPicker';
+import { EXPENSE_CATEGORIES, EXPENSE_MOODS, REGRET_REASONS } from '@/lib/constants';
+import { regretReasonLabel } from '@/lib/regretReasons';
+import { satisfactionLabel } from '@/lib/satisfactionScale';
+import { decisionAgainFromSatisfaction, needsRegretReasonsFlow } from '@/lib/reviewSatisfaction';
 import { formatDate } from '@/utils/time';
-import { EXPENSE_CATEGORIES, EXPENSE_MOODS } from '@/lib/constants';
 import { scheduleDueLabel } from '@/lib/scheduleLabels';
 
 export default function ExpenseDetailScreen() {
@@ -30,7 +33,7 @@ export default function ExpenseDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [expense, setExpense] = useState<Expense | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [schedules, setSchedules] = useState<ReviewSchedule[]>([]);
@@ -38,7 +41,6 @@ export default function ExpenseDetailScreen() {
   const [reviewMode, setReviewMode] = useState(false);
 
   // Review form state
-  const [decisionAgain, setDecisionAgain] = useState<DecisionAgain | ''>('');
   const [satisfaction, setSatisfaction] = useState<number | null>(null);
   const [regretReasons, setRegretReasons] = useState<RegretReason[]>([]);
   const [notes, setNotes] = useState('');
@@ -88,13 +90,8 @@ export default function ExpenseDetailScreen() {
       return;
     }
 
-    if (!decisionAgain) {
-      Alert.alert('오류', '다시 할지 여부를 선택해주세요.');
-      return;
-    }
-
     if (satisfaction === null) {
-      Alert.alert('오류', '만족도를 선택해주세요.');
+      Alert.alert('오류', '만족도를 선택해 주세요.');
       return;
     }
 
@@ -106,9 +103,9 @@ export default function ExpenseDetailScreen() {
         accountId: expense.accountId,
         reviewerUserId: user.uid,
         reviewType: 'self',
-        decisionAgain: decisionAgain as DecisionAgain,
+        decisionAgain: decisionAgainFromSatisfaction(satisfaction),
         satisfaction,
-        regretReasons,
+        regretReasons: needsRegretReasonsFlow(satisfaction) ? regretReasons : [],
         notes: notes.trim() || undefined,
         reviewedAt: new Date(),
       });
@@ -196,17 +193,14 @@ export default function ExpenseDetailScreen() {
                         {formatDate(review.reviewedAt)}
                         {schedule && ` (${scheduleDueLabel(schedule.type)})`}
                       </Text>
-                    <Text style={[styles.reviewDecision, { color: colors.text }]}>
-                      다시 할 것: {DECISION_AGAIN_OPTIONS.find((d) => d.value === review.decisionAgain)?.label}
-                    </Text>
                     <Text style={[styles.reviewSatisfaction, { color: colors.text }]}>
-                      만족도: {review.satisfaction}/5
+                      만족도: {satisfactionLabel(review.satisfaction) || `${review.satisfaction}/5`}
                     </Text>
                     {review.regretReasons.length > 0 && (
                       <View style={styles.reviewReasons}>
                         {review.regretReasons.map((reason, idx) => (
                           <Text key={idx} style={[styles.reviewReason, { color: colors.textSec }]}>
-                            • {REGRET_REASONS.find((r) => r.value === reason)?.label}
+                            • {regretReasonLabel(reason) ?? reason}
                           </Text>
                         ))}
                       </View>
@@ -233,62 +227,35 @@ export default function ExpenseDetailScreen() {
           <View style={styles.reviewForm}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>리뷰 작성</Text>
 
-            <Text style={[styles.label, { color: colors.text }]}>다시 할 것인가요? *</Text>
-            <View style={styles.options}>
-              {DECISION_AGAIN_OPTIONS.map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.option,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                    decisionAgain === option.value && { backgroundColor: colors.primary, borderColor: colors.primary },
-                  ]}
-                  onPress={() => setDecisionAgain(option.value as DecisionAgain)}
-                >
-                  <Text style={[styles.optionText, { color: colors.text }, decisionAgain === option.value && { color: colors.onPrimary, fontWeight: 'bold' }]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={[styles.label, { color: colors.text }]}>만족도 *</Text>
+            <SatisfactionLevelPicker
+              value={satisfaction ?? 0}
+              onChange={(stars) => setSatisfaction(stars)}
+              isDark={isDark}
+            />
 
-            <Text style={[styles.label, { color: colors.text }]}>만족도 (1-5) *</Text>
-            <View style={styles.options}>
-              {SATISFACTION_SCALE.map((num) => (
-                <TouchableOpacity
-                  key={num}
-                  style={[
-                    styles.option,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                    satisfaction === num && { backgroundColor: colors.primary, borderColor: colors.primary },
-                  ]}
-                  onPress={() => setSatisfaction(num)}
-                >
-                  <Text style={[styles.optionText, { color: colors.text }, satisfaction === num && { color: colors.onPrimary, fontWeight: 'bold' }]}>
-                    {num}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={[styles.label, { color: colors.text }]}>후회 이유 (복수 선택 가능)</Text>
-            <View style={styles.options}>
-              {REGRET_REASONS.map((reason) => (
-                <TouchableOpacity
-                  key={reason.value}
-                  style={[
-                    styles.option,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                    regretReasons.includes(reason.value) && { backgroundColor: colors.primary, borderColor: colors.primary },
-                  ]}
-                  onPress={() => toggleRegretReason(reason.value)}
-                >
-                  <Text style={[styles.optionText, { color: colors.text }, regretReasons.includes(reason.value) && { color: colors.onPrimary, fontWeight: 'bold' }]}>
-                    {reason.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {satisfaction != null && needsRegretReasonsFlow(satisfaction) ? (
+              <>
+                <Text style={[styles.label, { color: colors.text }]}>아쉬웠던 점 (복수 선택 가능)</Text>
+                <View style={styles.options}>
+                  {REGRET_REASONS.map((reason) => (
+                    <TouchableOpacity
+                      key={reason.key}
+                      style={[
+                        styles.option,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                        regretReasons.includes(reason.key) && { backgroundColor: colors.primary, borderColor: colors.primary },
+                      ]}
+                      onPress={() => toggleRegretReason(reason.key)}
+                    >
+                      <Text style={[styles.optionText, { color: colors.text }, regretReasons.includes(reason.key) && { color: colors.onPrimary, fontWeight: 'bold' }]}>
+                        {reason.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : null}
 
             <Text style={[styles.label, { color: colors.text }]}>메모</Text>
             <TextInput
@@ -350,7 +317,6 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, textAlign: 'center', padding: 32 },
   reviewCard: { padding: 16, borderRadius: 8, marginBottom: 12 },
   reviewDate: { fontSize: 12, marginBottom: 8 },
-  reviewDecision: { fontSize: 14, marginBottom: 4 },
   reviewSatisfaction: { fontSize: 14, marginBottom: 8 },
   reviewReasons: { marginTop: 8 },
   reviewReason: { fontSize: 14, marginBottom: 4 },

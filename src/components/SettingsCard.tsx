@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '@/theme/ThemeContext';
 
 export function SettingsCard({
@@ -9,28 +9,44 @@ export function SettingsCard({
   title: string;
   children: React.ReactNode;
 }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const elev =
+    !isDark && Platform.OS !== 'web'
+      ? {
+          shadowColor: '#1a2d4a',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.06,
+          shadowRadius: 12,
+          elevation: 2,
+        }
+      : {};
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        wrap: { gap: 6 },
-        title: { fontSize: 15, fontWeight: '900', color: colors.text, marginTop: 2 },
+        wrap: { gap: 8 },
+        title: {
+          fontSize: 13,
+          fontWeight: '600',
+          color: colors.textMuted,
+          marginLeft: 4,
+          letterSpacing: -0.1,
+        },
         card: {
           backgroundColor: colors.surface,
-          borderRadius: 14,
-          borderWidth: 1,
+          borderRadius: 16,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
-          padding: 14,
-          gap: 12,
+          overflow: 'hidden',
         },
       }),
-    [colors]
+    [colors],
   );
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>{title}</Text>
-      <View style={styles.card}>{children}</View>
+      <View style={[styles.card, elev]}>{children}</View>
     </View>
   );
 }

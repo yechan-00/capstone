@@ -1,15 +1,15 @@
-import { initializeApp, getApps, FirebaseApp } from '@firebase/app';
+import { initializeApp, getApps, FirebaseApp } from "@firebase/app";
 import {
   getFirestore,
   initializeFirestore,
   memoryLocalCache,
   type Firestore,
-} from 'firebase/firestore';
-import { getStorage, type FirebaseStorage } from 'firebase/storage';
-import { Platform } from 'react-native';
+} from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
+import { Platform } from "react-native";
 
 function initFirestoreDb(app: FirebaseApp): Firestore {
-  if (Platform.OS === 'web') {
+  if (Platform.OS === "web") {
     try {
       return initializeFirestore(app, {
         localCache: memoryLocalCache(),
@@ -28,7 +28,7 @@ function initFirestoreDb(app: FirebaseApp): Firestore {
 }
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBeZzyAeZ4R3mpw30LTGaA6D6guxAve4ko",
+  apiKey: "AIzaSyDI6LwcKowFy0bAagu8UyKZvmyVasTMxfc",
   authDomain: "regret-wallet-3db60.firebaseapp.com",
   projectId: "regret-wallet-3db60",
   storageBucket: "regret-wallet-3db60.firebasestorage.app",
@@ -38,19 +38,23 @@ const firebaseConfig = {
 };
 
 let app: FirebaseApp;
-let auth: import('@firebase/auth').Auth;
+let auth: import("@firebase/auth").Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
 
 if (getApps().length === 0) {
   app = initializeApp(firebaseConfig);
 
-  if (Platform.OS === 'web') {
-    const { getAuth } = require('firebase/auth');
+  if (Platform.OS === "web") {
+    const { getAuth } = require("firebase/auth");
     auth = getAuth(app);
   } else {
-    const { initializeAuth, getReactNativePersistence } = require('@firebase/auth/dist/rn');
-    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const {
+      initializeAuth,
+      getReactNativePersistence,
+    } = require("@firebase/auth/dist/rn");
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
     auth = initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage),
     });
@@ -60,11 +64,11 @@ if (getApps().length === 0) {
   storage = getStorage(app);
 } else {
   app = getApps()[0];
-  if (Platform.OS === 'web') {
-    const { getAuth } = require('firebase/auth');
+  if (Platform.OS === "web") {
+    const { getAuth } = require("firebase/auth");
     auth = getAuth(app);
   } else {
-    const { getAuth } = require('@firebase/auth/dist/rn');
+    const { getAuth } = require("@firebase/auth/dist/rn");
     auth = getAuth(app);
   }
   db = getFirestore(app);

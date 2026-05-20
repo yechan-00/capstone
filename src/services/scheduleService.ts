@@ -14,12 +14,17 @@ import {
   DocumentReference,
 } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { db } from '@/lib/firebase';
 import { ReviewSchedule, ScheduleStatus, ScheduleType } from '@/lib/types';
 import { timestampToDate } from '@/utils/firestore';
+import { filterVisibleInAppReviewSchedules, isInAppReviewReminderVisible } from '@/utils/reviewReminderVisibility';
 import { cancelReminder, scheduleReviewReminder } from '@/services/notificationService';
 
 const COLLECTION_NAME = 'review_schedules';
+
+/** Firestore `in` 쿼리 최대 10개 */
+const EXPENSE_ID_IN_CHUNK = 10;
 
 // 알림 핸들러 설정
 Notifications.setNotificationHandler({
@@ -159,7 +164,8 @@ export const scheduleService = {
           completedAt: timestampToDate(data.completedAt),
         } as ReviewSchedule;
       });
-      return dedupePendingSchedulesByExpense(rows);
+      const visible = filterVisibleInAppReviewSchedules(rows);
+      return dedupePendingSchedulesByExpense(visible);
     } catch (error) {
       console.error('Failed to get pending schedules:', error);
       throw new Error('대기 중인 스케줄을 조회하는데 실패했습니다.');
@@ -194,6 +200,54 @@ export const scheduleService = {
     } catch (error) {
       console.warn('Failed to get upcoming schedule:', error);
       return null;
+    }
+  },
+
+  /**
+   * 지출 ID 목록에 대해, 각 지출당 `pending` 스케줄 중 dueAt이 가장 이른 것 1건씩.
+   * (홈 캘린더 모달에서 미평가 시 평가 화면으로 보낼 scheduleId 확보용)
+   */
+  async getEarliestPendingScheduleByExpenseIds(
+    accountId: string,
+    expenseIds: string[]
+  ): Promise<Map<string, ReviewSchedule>> {
+    const unique = [...new Set(expenseIds.filter((id) => typeof id === 'string' && id.length > 0))];
+    const result = new Map<string, ReviewSchedule>();
+    if (unique.length === 0) {
+      return result;
+    }
+
+    try {
+      for (let i = 0; i < unique.length; i += EXPENSE_ID_IN_CHUNK) {
+        const chunk = unique.slice(i, i + EXPENSE_ID_IN_CHUNK);
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('expenseId', 'in', chunk),
+          where('status', '==', 'pending')
+        );
+        const snapshot = await getDocs(q);
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          const schedule = {
+            id: docSnap.id,
+            ...data,
+            dueAt: timestampToDate(data.dueAt),
+            createdAt: timestampToDate(data.createdAt),
+            completedAt: timestampToDate(data.completedAt),
+          } as ReviewSchedule;
+          if (!isInAppReviewReminderVisible(schedule)) continue;
+          const eid = schedule.expenseId;
+          const prev = result.get(eid);
+          if (!prev || schedule.dueAt.getTime() < prev.dueAt.getTime()) {
+            result.set(eid, schedule);
+          }
+        }
+      }
+      return result;
+    } catch (error) {
+      console.error('Failed to get pending schedules by expense ids:', error);
+      throw new Error('지출별 대기 스케줄을 조회하는데 실패했습니다.');
     }
   },
 
@@ -357,6 +411,44 @@ export const scheduleService = {
     } catch (error) {
       console.error('Failed to get account review delay days:', error);
       return [3];
+    }
+  },
+
+  /**
+   * 리뷰 예정일(dueAt) 이후에도 해당 스케줄의 주기(예: 3일)만큼 지나면 로컬 알림을 취소하고
+   * Firestore의 notificationId만 비웁니다. (스케줄은 pending 유지 — 앱에서 리뷰는 계속 가능)
+   */
+  async clearExpiredReviewReminderNotifications(accountId: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('status', '==', 'pending'),
+        ),
+      );
+      const now = Date.now();
+      for (const snap of snapshot.docs) {
+        const data = snap.data();
+        const schedule = {
+          id: snap.id,
+          ...data,
+          dueAt: timestampToDate(data.dueAt),
+          createdAt: timestampToDate(data.createdAt),
+          completedAt: timestampToDate(data.completedAt),
+        } as ReviewSchedule;
+        if (isInAppReviewReminderVisible(schedule, now)) continue;
+        const notificationId = data.notificationId as string | undefined;
+        if (notificationId) {
+          await cancelReminder(notificationId);
+        }
+        await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId: null });
+      }
+    } catch (e) {
+      console.warn('[schedule] clearExpiredReviewReminderNotifications', e);
     }
   },
 };

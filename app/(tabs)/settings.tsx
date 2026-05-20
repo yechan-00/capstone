@@ -14,10 +14,12 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/theme/ThemeContext';
 import { useDebouncedEffect } from '@/hooks/useDebouncedEffect';
 import { SettingsCard } from '@/components/SettingsCard';
+import { SettingsRow } from '@/components/SettingsRow';
 import { Chip } from '@/components/Chip';
 import {
   DEFAULT_REVIEW_REMINDER_TIME,
@@ -28,6 +30,16 @@ import {
 import AlarmTimeWheel from '@/components/AlarmTimeWheel';
 
 type IncomeUnit = 'base' | 'man' | 'baekman';
+type ReviewDelayDay = 1 | 3 | 7;
+
+const REVIEW_DELAY_OPTIONS: ReviewDelayDay[] = [1, 3, 7];
+
+function normalizeDelayDays(days: (1 | 3 | 7 | 30)[]): ReviewDelayDay[] {
+  const filtered = days.filter((d): d is ReviewDelayDay => d === 1 || d === 3 || d === 7);
+  if (filtered.length === 0) return [3];
+  const pick = filtered.includes(3) ? 3 : filtered.sort((a, b) => a - b)[0];
+  return [pick];
+}
 
 function parseReminderTimeToDate(time: string): Date {
   const [hh, mm] = time.split(':');
@@ -50,7 +62,7 @@ export default function SettingsScreen() {
   const { colors, isDark, setDarkMode } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
-  const [reviewDelayDays, setReviewDelayDays] = useState<(1 | 3 | 7 | 30)[]>([3]);
+  const [reviewDelayDays, setReviewDelayDays] = useState<ReviewDelayDay[]>([3]);
   const [showTimePicker, setShowTimePicker] = useState(false);
   /** iOS 모달에서 스크롤과 겹치지 않게 휠 조작용 */
   const [pendingTime, setPendingTime] = useState<Date>(() => new Date());
@@ -90,8 +102,8 @@ export default function SettingsScreen() {
     setTimeValue(parseReminderTimeToDate(t));
     setReviewReminderEnabled(resolveReviewReminderEnabled(account));
     setReviewDelayDays((prev) => {
-      const next = resolveReviewDelayDays(account);
-      if (prev.length === next.length && prev.every((v, i) => v === next[i])) {
+      const next = normalizeDelayDays(resolveReviewDelayDays(account));
+      if (prev.length === next.length && prev[0] === next[0]) {
         return prev;
       }
       return next;
@@ -138,13 +150,15 @@ export default function SettingsScreen() {
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   };
 
-  const formatDisplayTime = (date: Date) => {
+  const formatTimeAmPm = (date: Date) => {
     const hour = date.getHours();
     const minute = date.getMinutes();
-    const period = hour >= 12 ? '오후' : '오전';
+    const period = hour >= 12 ? 'PM' : 'AM';
     const hour12 = hour % 12 === 0 ? 12 : hour % 12;
-    return `${period} ${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
   };
+
+  const selectedDelayDay = reviewDelayDays[0] ?? 3;
 
   const handleAndroidTimeChange = (event: { type?: string }, selectedDate?: Date) => {
     setShowTimePicker(false);
@@ -185,7 +199,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const saveReviewDelayDays = async (days: (1 | 3 | 7 | 30)[]) => {
+  const saveReviewDelayDays = async (days: ReviewDelayDay[]) => {
     try {
       const accountDays = resolveReviewDelayDays(account);
       if (accountDays.length === days.length && accountDays.every((v, i) => v === days[i])) {
@@ -277,26 +291,80 @@ export default function SettingsScreen() {
           backgroundColor: colors.bg,
         },
         content: {
-          paddingHorizontal: 12,
-          paddingTop: 6,
-          paddingBottom: 28,
-          gap: 12,
+          paddingHorizontal: 16,
+          paddingTop: 10,
+          paddingBottom: 32,
+          gap: 20,
         },
         saveHint: {
           color: colors.textSec,
           fontWeight: '700',
           fontSize: 13,
-          marginBottom: 2,
+          marginBottom: -8,
           minHeight: 18,
+          marginLeft: 4,
         },
-        infoRow: {
+        cardInset: {
+          paddingHorizontal: 16,
+          paddingBottom: 16,
+          paddingTop: 4,
+          gap: 14,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+        },
+        fieldLabel: {
+          fontSize: 13,
+          fontWeight: '600',
+          color: colors.textMuted,
+          marginBottom: -6,
+        },
+        timeField: {
           flexDirection: 'row',
+          alignItems: 'center',
           justifyContent: 'space-between',
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          borderRadius: 12,
+          backgroundColor: colors.inputBg,
+          paddingHorizontal: 14,
           paddingVertical: 12,
+        },
+        timeFieldText: {
+          fontSize: 15,
+          fontWeight: '700',
+          color: colors.text,
+        },
+        delayRow: {
+          flexDirection: 'row',
+          gap: 8,
+        },
+        delayChip: {
+          flex: 1,
+          paddingVertical: 9,
+          borderRadius: 12,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceMuted,
           alignItems: 'center',
         },
+        delayChipActive: {
+          backgroundColor: colors.accentCta,
+          borderColor: colors.accentCta,
+        },
+        delayChipText: {
+          fontSize: 13,
+          fontWeight: '800',
+          color: colors.textSec,
+        },
+        delayChipTextActive: {
+          color: colors.onPrimary,
+        },
+        incomeBody: {
+          padding: 16,
+          gap: 14,
+        },
         infoRowColumn: {
-          paddingVertical: 12,
+          gap: 10,
         },
         incomeRow: {
           flexDirection: 'row',
@@ -329,86 +397,32 @@ export default function SettingsScreen() {
           color: colors.text,
           backgroundColor: colors.inputBg,
         },
-        label: {
-          fontSize: 16,
-          color: colors.textSec,
-        },
-        value: {
-          fontSize: 16,
-          color: colors.text,
-          fontWeight: '500',
-        },
-        accountValue: {
-          flex: 1,
-          marginLeft: 12,
-          textAlign: 'right',
+        incomeLabel: {
+          fontSize: 14,
+          fontWeight: '600',
+          color: colors.textMuted,
         },
         logoutButton: {
           height: 52,
           borderRadius: 16,
-          borderWidth: 1,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.logoutBorder,
           backgroundColor: colors.surface,
+          flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
+          gap: 8,
+          marginTop: 4,
         },
         logoutText: {
           color: colors.logoutText,
-          fontWeight: '900',
-        },
-        timeRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-        },
-        timePickerButton: {
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 6,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          backgroundColor: colors.surface,
-        },
-        timePickerText: {
-          fontSize: 14,
-          color: colors.text,
-          fontWeight: '600',
+          fontWeight: '800',
+          fontSize: 16,
         },
         helperText: {
-          marginTop: 8,
           fontSize: 12,
           color: colors.textMuted,
-        },
-        footer: {
-          flex: 1,
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          paddingBottom: 24,
-        },
-        footerText: {
-          fontSize: 12,
-          color: colors.textMuted,
-        },
-        securityRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingVertical: 12,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.border,
-        },
-        securityRowLast: {
-          borderBottomWidth: 0,
-        },
-        securityLabel: {
-          fontSize: 16,
-          fontWeight: '700',
-          color: colors.text,
-        },
-        securityChevron: {
-          fontSize: 18,
-          color: colors.textMuted,
-          fontWeight: '700',
+          fontWeight: '600',
         },
         modalSheet: {
           backgroundColor: colors.surface,
@@ -477,110 +491,111 @@ export default function SettingsScreen() {
         </Text>
 
         <SettingsCard title="계정">
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>닉네임</Text>
-            <Text style={[styles.value, styles.accountValue]} numberOfLines={1}>
-              {(account?.nickname ?? '').trim() || '미설정'}
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>이메일</Text>
-            <Text style={[styles.value, styles.accountValue]} numberOfLines={1}>
-              {user?.email || '-'}
-            </Text>
-          </View>
+          <SettingsRow
+            icon="person-outline"
+            title="닉네임"
+            subtitle={(account?.nickname ?? '').trim() || '미설정'}
+            onPress={() => router.push('/settings/change-nickname')}
+          />
+          <SettingsRow
+            icon="person-outline"
+            title="이메일"
+            subtitle={user?.email || '-'}
+            onPress={() => router.push('/settings/change-email')}
+            last
+          />
         </SettingsCard>
 
         <SettingsCard title="월 수입">
-          <View style={styles.infoRowColumn}>
-            <Text style={styles.label}>월 수입 (향후 인사이트·비율 분석에 사용)</Text>
-            <View style={styles.incomeRow}>
-              <TextInput
-                value={incomeAmount}
-                onChangeText={(value) =>
-                  setIncomeAmount(formatNumber(value, incomeCurrency === 'USD'))
-                }
-                placeholder="0"
-                keyboardType={incomeCurrency === 'USD' ? 'decimal-pad' : 'number-pad'}
-                style={styles.incomeInput}
-              />
-              <View style={styles.chipRow}>
-                <Chip label="KRW" active={incomeCurrency === 'KRW'} onPress={() => setIncomeCurrency('KRW')} />
-                <Chip label="USD" active={incomeCurrency === 'USD'} onPress={() => setIncomeCurrency('USD')} />
+          <View style={styles.incomeBody}>
+            <View style={styles.infoRowColumn}>
+              <Text style={styles.incomeLabel}>월 수입 (향후 인사이트·비율 분석에 사용)</Text>
+              <View style={styles.incomeRow}>
+                <TextInput
+                  value={incomeAmount}
+                  onChangeText={(value) =>
+                    setIncomeAmount(formatNumber(value, incomeCurrency === 'USD'))
+                  }
+                  placeholder="0"
+                  keyboardType={incomeCurrency === 'USD' ? 'decimal-pad' : 'number-pad'}
+                  style={styles.incomeInput}
+                />
+                <View style={styles.chipRow}>
+                  <Chip label="KRW" active={incomeCurrency === 'KRW'} onPress={() => setIncomeCurrency('KRW')} />
+                  <Chip label="USD" active={incomeCurrency === 'USD'} onPress={() => setIncomeCurrency('USD')} />
+                </View>
               </View>
             </View>
+            {incomeCurrency === 'KRW' && (
+              <View style={styles.unitRow}>
+                <Text style={styles.unitLabel}>입력 단위</Text>
+                <View style={styles.chipRow}>
+                  <Chip label="원" active={incomeUnit === 'base'} onPress={() => setIncomeUnit('base')} />
+                  <Chip label="만원" active={incomeUnit === 'man'} onPress={() => setIncomeUnit('man')} />
+                  <Chip label="백만원" active={incomeUnit === 'baekman'} onPress={() => setIncomeUnit('baekman')} />
+                </View>
+              </View>
+            )}
+            {incomeCurrency === 'USD' && (
+              <View style={styles.incomeRow}>
+                <Chip label="USD→KRW 환율" disabled />
+                <TextInput
+                  value={exchangeRate}
+                  onChangeText={(value) => setExchangeRate(formatNumber(value, true))}
+                  placeholder="1470.05"
+                  keyboardType="decimal-pad"
+                  style={styles.incomeInput}
+                />
+              </View>
+            )}
           </View>
-          {incomeCurrency === 'KRW' && (
-            <View style={styles.unitRow}>
-              <Text style={styles.unitLabel}>입력 단위</Text>
-              <View style={styles.chipRow}>
-                <Chip label="원" active={incomeUnit === 'base'} onPress={() => setIncomeUnit('base')} />
-                <Chip label="만원" active={incomeUnit === 'man'} onPress={() => setIncomeUnit('man')} />
-                <Chip label="백만원" active={incomeUnit === 'baekman'} onPress={() => setIncomeUnit('baekman')} />
-              </View>
-            </View>
-          )}
-          {incomeCurrency === 'USD' && (
-            <View style={styles.infoRow}>
-              <Chip label="USD→KRW 환율" disabled />
-              <TextInput
-                value={exchangeRate}
-                onChangeText={(value) => setExchangeRate(formatNumber(value, true))}
-                placeholder="1470.05"
-                keyboardType="decimal-pad"
-                style={styles.incomeInput}
-              />
-            </View>
-          )}
         </SettingsCard>
 
-        <SettingsCard title="리뷰 알림">
-          <View style={styles.infoRow}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={styles.label}>리뷰 알림</Text>
-              <Text style={[styles.helperText, { marginTop: 4 }]}>
-                소비일 기준 3일째 되는 날, 아래 시각에 맞춰 알림을 보내요 (기본 {DEFAULT_REVIEW_REMINDER_TIME}).
-              </Text>
+        <SettingsCard title="알림">
+          <SettingsRow
+            icon="notifications-none"
+            title="리뷰 알림"
+            subtitle="정기적으로 리뷰 요청 알림을 받으세요"
+            showChevron={false}
+            rightElement={
+              <Switch
+                value={reviewReminderEnabled}
+                onValueChange={setReviewReminderEnabled}
+                trackColor={{ false: colors.border, true: colors.accentCta }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.border}
+              />
+            }
+          />
+          <View style={[styles.cardInset, { opacity: reviewReminderEnabled ? 1 : 0.45 }]}>
+            <Text style={styles.fieldLabel}>알림 시간</Text>
+            <TouchableOpacity
+              style={styles.timeField}
+              onPress={openTimePicker}
+              disabled={!reviewReminderEnabled}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.timeFieldText}>{formatTimeAmPm(timeValue)}</Text>
+              <MaterialIcons name="schedule" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <Text style={styles.fieldLabel}>피드백 주기 (소비 후 며칠 뒤에 리뷰 요청)</Text>
+            <View style={styles.delayRow}>
+              {REVIEW_DELAY_OPTIONS.map((d) => {
+                const active = selectedDelayDay === d;
+                return (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.delayChip, active && styles.delayChipActive]}
+                    onPress={() => setReviewDelayDays([d])}
+                    disabled={!reviewReminderEnabled}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={[styles.delayChipText, active && styles.delayChipTextActive]}>{d}일</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            <Switch
-              value={reviewReminderEnabled}
-              onValueChange={setReviewReminderEnabled}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor="#fff"
-              ios_backgroundColor={colors.border}
-            />
-          </View>
-          <View style={[styles.infoRowColumn, { opacity: reviewReminderEnabled ? 1 : 0.45 }]}>
-            <Text style={styles.label}>리뷰 알림 시각</Text>
-            <View style={styles.timeRow}>
-              <TouchableOpacity
-                style={styles.timePickerButton}
-                onPress={openTimePicker}
-                disabled={!reviewReminderEnabled}
-              >
-                <Text style={styles.timePickerText}>{formatDisplayTime(timeValue)}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          <View style={styles.infoRowColumn}>
-            <Text style={styles.label}>리뷰 피드백 주기</Text>
-            <View style={styles.chipRow}>
-              {[1, 3, 7, 30].map((d) => (
-                <Chip
-                  key={d}
-                  label={`${d}일`}
-                  active={reviewDelayDays.includes(d as any)}
-                  onPress={() => {
-                    setReviewDelayDays((prev) => {
-                      const has = prev.includes(d as any);
-                      const next = has ? prev.filter((x) => x !== d) : [...prev, d as any];
-                      return next.length > 0 ? next.sort((a, b) => a - b) : [3];
-                    });
-                  }}
-                />
-              ))}
-            </View>
-            <Text style={styles.helperText}>소비 후 몇 일 뒤에 리뷰를 요청할지 선택해요.</Text>
           </View>
           {Platform.OS === 'android' && showTimePicker && reviewReminderEnabled && (
             <DateTimePicker
@@ -623,6 +638,7 @@ export default function SettingsScreen() {
                         value={pendingTime}
                         mode="time"
                         display="spinner"
+                        locale="ko_KR"
                         themeVariant={isDark ? 'dark' : 'light'}
                         onChange={(_, date) => {
                           if (date) setPendingTime(date);
@@ -634,62 +650,47 @@ export default function SettingsScreen() {
               </View>
             </Modal>
           )}
-          <Text style={styles.helperText}>탭해서 시간을 변경할 수 있어요</Text>
         </SettingsCard>
 
-        <SettingsCard title="보안 설정">
-          <Text style={[styles.helperText, { marginTop: 0 }]}>
-            닉네임·이메일·비밀번호는 아래에서만 바꿀 수 있어요.
-          </Text>
-          <TouchableOpacity
-            style={styles.securityRow}
-            onPress={() => router.push('/settings/change-nickname')}
-            accessibilityRole="button"
-          >
-            <Text style={styles.securityLabel}>닉네임 변경</Text>
-            <Text style={styles.securityChevron}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.securityRow}
-            onPress={() => router.push('/settings/change-email')}
-            accessibilityRole="button"
-          >
-            <Text style={styles.securityLabel}>이메일 변경</Text>
-            <Text style={styles.securityChevron}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.securityRow, styles.securityRowLast]}
+        <SettingsCard title="보안">
+          <SettingsRow
+            icon="lock-outline"
+            title="비밀번호 변경"
+            subtitle="변경하기"
             onPress={() => router.push('/settings/change-password')}
-            accessibilityRole="button"
-          >
-            <Text style={styles.securityLabel}>비밀번호 변경</Text>
-            <Text style={styles.securityChevron}>›</Text>
-          </TouchableOpacity>
+          />
+          <SettingsRow
+            icon="shield"
+            title="로그인 기기 관리"
+            subtitle="보기"
+            onPress={() => Alert.alert('준비 중', '로그인 기기 관리는 곧 제공할 예정이에요.')}
+            last
+          />
         </SettingsCard>
 
         <SettingsCard title="표시">
-          <View style={styles.infoRow}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={styles.label}>다크 모드</Text>
-              <Text style={[styles.helperText, { marginTop: 4 }]}>어두운 테마로 화면을 표시해요</Text>
-            </View>
-            <Switch
-              value={isDark}
-              onValueChange={setDarkMode}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor="#fff"
-              ios_backgroundColor={colors.border}
-            />
-          </View>
+          <SettingsRow
+            icon="visibility"
+            title="다크 모드"
+            subtitle="어두운 테마로 화면을 표시하세요"
+            showChevron={false}
+            rightElement={
+              <Switch
+                value={isDark}
+                onValueChange={setDarkMode}
+                trackColor={{ false: colors.border, true: colors.accentCta }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.border}
+              />
+            }
+            last
+          />
         </SettingsCard>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.88}>
+          <MaterialIcons name="logout" size={20} color={colors.logoutText} />
           <Text style={styles.logoutText}>로그아웃</Text>
         </TouchableOpacity>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>RegretWallet v1.0.0</Text>
-        </View>
     </ScrollView>
   );
 }
