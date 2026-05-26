@@ -17,8 +17,14 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { db } from '@/lib/firebase';
 import { ReviewSchedule, ScheduleStatus, ScheduleType } from '@/lib/types';
-import { timestampToDate } from '@/utils/firestore';
-import { filterVisibleInAppReviewSchedules, isInAppReviewReminderVisible } from '@/utils/reviewReminderVisibility';
+import { requireUserIdFromAccountId } from '@/lib/accountId';
+import { mapScheduleDoc } from '@/utils/firestore';
+import { isReviewWindowOpen, isReviewWindowExpired, isReviewEvaluable } from '@/lib/reviewWindow';
+import {
+  computeReviewExpiresAt,
+  computeReviewNotificationAt,
+  computeReviewOpensAt,
+} from '@/lib/reviewWindow';
 import { cancelReminder, scheduleReviewReminder } from '@/services/notificationService';
 
 const COLLECTION_NAME = 'review_schedules';
@@ -37,27 +43,11 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/** 리뷰 예약 알림은 스케줄 타입과 관계없이 3일 리뷰 안내만 사용 (레거시 스케줄 동일 문구) */
-function reviewNotificationCopy(_type: ScheduleType): { title: string; body: string } {
+function reviewNotificationCopy(): { title: string; body: string } {
   return {
-    title: '3일 리뷰',
-    body: '3일 전쯤 기록한 소비가 어땠는지, 후회도를 남겨 보세요.',
+    title: '소비 평가',
+    body: '어제 기록한 소비, 후회했는지 짧게 남겨 보세요.',
   };
-}
-
-function mapDelayDaysToScheduleType(days: 1 | 3 | 7 | 30): ScheduleType {
-  if (days === 1) return 'd1';
-  if (days === 7) return 'd7';
-  if (days === 30) return 'd30';
-  return 'd3';
-}
-
-function computeDueAtByDelayDays(spentAt: Date, delayDays: 1 | 3 | 7 | 30, notificationTime?: string): Date {
-  const d = new Date(spentAt);
-  d.setDate(d.getDate() + delayDays);
-  const [hour, minute] = (notificationTime || '19:00').split(':').map((v) => Number(v));
-  d.setHours(Number.isNaN(hour) ? 19 : hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
-  return d;
 }
 
 /** 소비당 대기 카드 1개: dueAt 오름차순에서 같은 expenseId는 첫 항목만 유지 */
@@ -78,62 +68,47 @@ export const scheduleService = {
     accountId: string,
     spentAt: Date
   ): Promise<void> {
+    const userId = requireUserIdFromAccountId(accountId);
     const notificationTime = await this.getAccountNotificationTime(accountId);
-    const reviewDelayDays = await this.getAccountReviewDelayDays(accountId);
-    const schedules: { type: ScheduleType; delayDays: number; dueAt: Date }[] = reviewDelayDays.map((d) => ({
-      type: mapDelayDaysToScheduleType(d),
-      delayDays: d,
-      dueAt: computeDueAtByDelayDays(spentAt, d, notificationTime),
-    }));
+    const opensAt = computeReviewOpensAt(spentAt);
+    const expiresAt = computeReviewExpiresAt(spentAt);
+    const notifyAt = computeReviewNotificationAt(spentAt, notificationTime);
 
-    // 각 스케줄마다 알림은 시도하되 실패해도 Firestore 저장은 계속
-    const results = await Promise.all(
-      schedules.map(async ({ type, delayDays, dueAt }) => {
-        // 알림 스케줄링 (실패해도 무시)
-        let notificationId = '';
-        try {
-          notificationId = await this.scheduleNotification(expenseId, type, dueAt);
-        } catch {
-          // 알림 실패 무시 - 리뷰는 앱에서 직접 작성 가능
-        }
-        return { type, delayDays, dueAt, notificationId };
-      })
-    );
+    let notificationId = '';
+    try {
+      notificationId = await this.scheduleNotification(expenseId, notifyAt);
+    } catch {
+      // 알림 실패 무시
+    }
 
-    // Firestore 스케줄 저장 (알림 성공/실패 관계없이 항상 저장)
-    await Promise.all(
-      results.map(({ type, delayDays, dueAt, notificationId }) => {
-        const schedule: Omit<ReviewSchedule, 'id' | 'createdAt'> = {
-          expenseId,
-          accountId,
-          type,
-          dueAt,
-          delayDays,
-          status: 'pending',
-          notificationId,
-        };
-        return addDoc(collection(db, COLLECTION_NAME), {
-          ...schedule,
-          dueAt: Timestamp.fromDate(dueAt),
-          createdAt: serverTimestamp(),
-        });
-      })
-    );
+    const schedule: Omit<ReviewSchedule, 'id' | 'createdAt'> = {
+      expenseId,
+      accountId,
+      userId,
+      type: 'd1',
+      dueAt: opensAt,
+      expiresAt,
+      delayDays: 1,
+      status: 'pending',
+      notificationId,
+    };
 
+    await addDoc(collection(db, COLLECTION_NAME), {
+      ...schedule,
+      dueAt: Timestamp.fromDate(opensAt),
+      expiresAt: Timestamp.fromDate(expiresAt),
+      createdAt: serverTimestamp(),
+    });
   },
 
-  async scheduleNotification(
-    expenseId: string,
-    scheduleType: ScheduleType,
-    dueAt: Date
-  ): Promise<string> {
+  async scheduleNotification(expenseId: string, notifyAt: Date): Promise<string> {
     try {
-      const { title, body } = reviewNotificationCopy(scheduleType);
+      const { title, body } = reviewNotificationCopy();
       const notificationId = await scheduleReviewReminder({
         title,
         body,
-        dueAt,
-        data: { expenseId, scheduleType },
+        dueAt: notifyAt,
+        data: { expenseId, scheduleType: 'd1' },
       });
       return notificationId;
     } catch (error) {
@@ -142,8 +117,42 @@ export const scheduleService = {
     }
   },
 
+  /** 평가 기한(47h59m) 지난 pending → expired */
+  async expireStalePendingSchedules(accountId: string): Promise<number> {
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('status', '==', 'pending'),
+        ),
+      );
+      let count = 0;
+      const now = Date.now();
+      await Promise.all(
+        snapshot.docs.map(async (snap) => {
+          const schedule = mapScheduleDoc(snap);
+          if (!isReviewWindowExpired(schedule, now)) return;
+          const notificationId = snap.data().notificationId as string | undefined;
+          await updateDoc(doc(db, COLLECTION_NAME, snap.id), {
+            status: 'expired' as ScheduleStatus,
+            completedAt: serverTimestamp(),
+            notificationId: null,
+          });
+          if (notificationId) await cancelReminder(notificationId);
+          count += 1;
+        }),
+      );
+      return count;
+    } catch (error) {
+      console.warn('[schedule] expireStalePendingSchedules', error);
+      return 0;
+    }
+  },
+
   async getPendingSchedules(accountId: string): Promise<ReviewSchedule[]> {
     try {
+      await this.expireStalePendingSchedules(accountId);
       const now = Timestamp.now();
       const q = query(
         collection(db, COLLECTION_NAME),
@@ -154,21 +163,33 @@ export const scheduleService = {
       );
 
       const snapshot = await getDocs(q);
-      const rows = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          dueAt: timestampToDate(data.dueAt),
-          createdAt: timestampToDate(data.createdAt),
-          completedAt: timestampToDate(data.completedAt),
-        } as ReviewSchedule;
-      });
-      const visible = filterVisibleInAppReviewSchedules(rows);
-      return dedupePendingSchedulesByExpense(visible);
+      const rows = snapshot.docs.map(mapScheduleDoc).filter((s) => isReviewWindowOpen(s));
+      return dedupePendingSchedulesByExpense(rows);
     } catch (error) {
       console.error('Failed to get pending schedules:', error);
       throw new Error('대기 중인 스케줄을 조회하는데 실패했습니다.');
+    }
+  },
+
+  async getExpiredReviewSchedules(accountId: string): Promise<ReviewSchedule[]> {
+    try {
+      await this.expireStalePendingSchedules(accountId);
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('accountId', '==', accountId),
+        where('status', '==', 'expired'),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs
+        .map(mapScheduleDoc)
+        .sort((a, b) => {
+          const aTime = (a.completedAt ?? a.dueAt).getTime();
+          const bTime = (b.completedAt ?? b.dueAt).getTime();
+          return bTime - aTime;
+        });
+    } catch (error) {
+      console.error('Failed to get expired schedules:', error);
+      throw new Error('지나간 리뷰를 조회하는데 실패했습니다.');
     }
   },
 
@@ -189,14 +210,7 @@ export const scheduleService = {
       if (!docSnap) {
         return null;
       }
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        ...data,
-        dueAt: timestampToDate(data.dueAt),
-        createdAt: timestampToDate(data.createdAt),
-        completedAt: timestampToDate(data.completedAt),
-      } as ReviewSchedule;
+      return mapScheduleDoc(docSnap);
     } catch (error) {
       console.warn('Failed to get upcoming schedule:', error);
       return null;
@@ -204,12 +218,13 @@ export const scheduleService = {
   },
 
   /**
-   * 지출 ID 목록에 대해, 각 지출당 `pending` 스케줄 중 dueAt이 가장 이른 것 1건씩.
+   * 지출 ID 목록에 대해, 각 지출당 평가 가능한 스케줄 중 dueAt이 가장 이른 것 1건씩.
    * (홈 캘린더 모달에서 미평가 시 평가 화면으로 보낼 scheduleId 확보용)
    */
   async getEarliestPendingScheduleByExpenseIds(
     accountId: string,
-    expenseIds: string[]
+    expenseIds: string[],
+    opts?: { includePastGraceWindow?: boolean },
   ): Promise<Map<string, ReviewSchedule>> {
     const unique = [...new Set(expenseIds.filter((id) => typeof id === 'string' && id.length > 0))];
     const result = new Map<string, ReviewSchedule>();
@@ -224,19 +239,16 @@ export const scheduleService = {
           collection(db, COLLECTION_NAME),
           where('accountId', '==', accountId),
           where('expenseId', 'in', chunk),
-          where('status', '==', 'pending')
+          where('status', 'in', ['pending', 'expired']),
         );
         const snapshot = await getDocs(q);
         for (const docSnap of snapshot.docs) {
-          const data = docSnap.data();
-          const schedule = {
-            id: docSnap.id,
-            ...data,
-            dueAt: timestampToDate(data.dueAt),
-            createdAt: timestampToDate(data.createdAt),
-            completedAt: timestampToDate(data.completedAt),
-          } as ReviewSchedule;
-          if (!isInAppReviewReminderVisible(schedule)) continue;
+          const schedule = mapScheduleDoc(docSnap);
+          if (opts?.includePastGraceWindow) {
+            if (!isReviewEvaluable(schedule)) continue;
+          } else if (!isReviewWindowOpen(schedule)) {
+            continue;
+          }
           const eid = schedule.expenseId;
           const prev = result.get(eid);
           if (!prev || schedule.dueAt.getTime() < prev.dueAt.getTime()) {
@@ -257,20 +269,12 @@ export const scheduleService = {
         collection(db, COLLECTION_NAME),
         where('accountId', '==', accountId),
         where('expenseId', '==', expenseId),
-        orderBy('delayDays', 'asc')
       );
 
       const snapshot = await getDocs(q);
-      return snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          dueAt: timestampToDate(data.dueAt),
-          createdAt: timestampToDate(data.createdAt),
-          completedAt: timestampToDate(data.completedAt),
-        } as ReviewSchedule;
-      });
+      return snapshot.docs
+        .map(mapScheduleDoc)
+        .sort((a, b) => a.delayDays - b.delayDays);
     } catch (error) {
       console.error('Failed to get schedules:', error);
       throw new Error('스케줄을 조회하는데 실패했습니다.');
@@ -378,6 +382,21 @@ export const scheduleService = {
       }
     }
   },
+  async syncScheduleFromSpentAt(
+    scheduleId: string,
+    accountId: string,
+    spentAt: Date,
+  ): Promise<void> {
+    const opensAt = computeReviewOpensAt(spentAt);
+    const expiresAt = computeReviewExpiresAt(spentAt);
+    await updateDoc(doc(db, COLLECTION_NAME, scheduleId), {
+      dueAt: Timestamp.fromDate(opensAt),
+      expiresAt: Timestamp.fromDate(expiresAt),
+      delayDays: 1,
+      type: 'd1',
+    });
+  },
+
   async getAccountNotificationTime(accountId: string): Promise<string | undefined> {
     try {
       const accountDoc = await getDoc(doc(db, 'accounts', accountId));
@@ -423,6 +442,7 @@ export const scheduleService = {
       return;
     }
     try {
+      await this.expireStalePendingSchedules(accountId);
       const snapshot = await getDocs(
         query(
           collection(db, COLLECTION_NAME),
@@ -430,18 +450,10 @@ export const scheduleService = {
           where('status', '==', 'pending'),
         ),
       );
-      const now = Date.now();
       for (const snap of snapshot.docs) {
-        const data = snap.data();
-        const schedule = {
-          id: snap.id,
-          ...data,
-          dueAt: timestampToDate(data.dueAt),
-          createdAt: timestampToDate(data.createdAt),
-          completedAt: timestampToDate(data.completedAt),
-        } as ReviewSchedule;
-        if (isInAppReviewReminderVisible(schedule, now)) continue;
-        const notificationId = data.notificationId as string | undefined;
+        const schedule = mapScheduleDoc(snap);
+        if (isReviewWindowOpen(schedule)) continue;
+        const notificationId = snap.data().notificationId as string | undefined;
         if (notificationId) {
           await cancelReminder(notificationId);
         }

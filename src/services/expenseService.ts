@@ -13,6 +13,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { resolveDocumentUserId, resolveUserId } from '@/lib/accountId';
 import { Expense } from '@/lib/types';
 import { normalizeExpenseCategory } from '@/lib/categoryAnalytics';
 import { scheduleService } from './scheduleService';
@@ -37,6 +38,7 @@ function toExpense(id: string, data: Record<string, unknown>): Expense {
   return {
     id,
     accountId: data.accountId as string,
+    userId: resolveDocumentUserId(data as { accountId?: string; userId?: string }) ?? '',
     amount: data.amount as number,
     category,
     item,
@@ -60,8 +62,10 @@ export const expenseService = {
     try {
       const category = normalizeExpenseCategory(expense.category);
       const item = expense.item?.trim() || expense.content?.trim() || undefined;
+      const userId = resolveUserId({ accountId: expense.accountId, userId: expense.userId });
       const createData = stripUndefinedFields({
         ...expense,
+        userId,
         category,
         item,
         content: item ?? expense.content,
@@ -143,8 +147,9 @@ export const expenseService = {
         updateData.spentAt = Timestamp.fromDate(updates.spentAt);
       }
 
-      // accountId는 변경 불가
+      // accountId·userId는 변경 불가
       delete updateData.accountId;
+      delete updateData.userId;
       delete updateData.id;
 
       await updateDoc(doc(db, COLLECTION_NAME, expenseId), stripUndefinedFields(updateData));

@@ -9,10 +9,9 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { showAlert } from '@/utils/alert';
 import { validateEmail, validatePassword } from '@/utils/validation';
+import { mapFirebaseAuthError } from '@/utils/firebaseAuthErrors';
 
 const NAVY = '#1B2D5B';
-const NAVY_LIGHT = '#2A3F7A';
-const NAVY_INPUT = '#243568';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -37,7 +36,7 @@ export default function LoginScreen() {
       await signIn(email, password);
       router.replace('/(tabs)');
     } catch (error: any) {
-      showAlert('로그인 실패', error.message || '로그인에 실패했습니다.');
+      showAlert('로그인 실패', mapFirebaseAuthError(error, '로그인에 실패했습니다.'));
     } finally {
       setLoading(false);
     }
@@ -136,7 +135,6 @@ export default function LoginScreen() {
               }
             </TouchableOpacity>
           </View>
-
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

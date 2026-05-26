@@ -6,7 +6,7 @@ export default function SettingsStackLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: true,
+        headerShown: false,
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.primaryDark,
         headerTitleStyle: { fontWeight: '800' as const },

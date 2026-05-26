@@ -28,7 +28,7 @@ import { Chip } from '@/components/Chip';
 import { AppCard } from '@/components/AppCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SpentAtDateTimePickers } from '@/components/SpentAtDateTimePickers';
-import { CATEGORIES, MOODS, QUICK_AMOUNTS, REASON_GROUPS, CategoryKey } from '@/lib/expenseOptions';
+import { CATEGORIES, MOODS, QUICK_AMOUNTS, REASONS, CategoryKey } from '@/lib/expenseOptions';
 import { ExpenseMood } from '@/lib/types';
 import { scanReceiptImage } from '@/services/geminiService';
 import { buildManualExpensePayload } from '@/services/expenseInput/manualExpensePayload';
@@ -37,6 +37,11 @@ import { parsePastedExpenseText } from '@/services/expenseInput/fromPastedText';
 import { uploadExpenseImage } from '@/services/storageService';
 import { scheduleRiskAwarenessAfterExpense } from '@/services/riskSpendingNotification';
 import { useTheme } from '@/theme/ThemeContext';
+import {
+  amountKeyboardProps,
+  koreanTextInputProps,
+  useIosKoreanFieldTransition,
+} from '@/lib/koreanTextInput';
 
 const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
 
@@ -47,10 +52,7 @@ const LAST_STEP = ADD_STEPS.length - 1;
 /** +2만(20000) 칩은 한 줄에 초기화까지 넣기 위해 제외 */
 const QUICK_AMOUNTS_STEP = QUICK_AMOUNTS.filter((v) => v !== 20000);
 const PHOTO_PREVIEW_MAX_HEIGHT = 320;
-const REASON_CHIP_ROWS = [
-  REASON_GROUPS[0].items.slice(0, 4),
-  REASON_GROUPS[0].items.slice(4),
-] as const;
+const REASON_CHIP_ROWS = [REASONS.slice(0, 4), REASONS.slice(4)] as const;
 
 /** 원본 비율 유지하며 박스 안에 전체가 들어가도록 크기 계산 */
 function fitImageInBox(srcW: number, srcH: number, maxW: number, maxH: number) {
@@ -73,6 +75,8 @@ export default function AddExpenseScreen() {
   const { colors, isDark } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const amountRef = useRef<TextInput>(null);
+  const itemRef = useRef<TextInput>(null);
+  const { markFromFocused, handleKoreanFieldFocus } = useIosKoreanFieldTransition(amountRef);
   /** 카드 좌우 패딩·액센트 바 제외한 미리보기 최대 너비 */
   const photoPreviewMaxWidth = windowWidth - 56;
   const [photoPreviewSize, setPhotoPreviewSize] = useState<{ width: number; height: number } | null>(
@@ -87,6 +91,7 @@ export default function AddExpenseScreen() {
   const [customReason, setCustomReason] = useState('');
   const [reasonDetail, setReasonDetail] = useState('');
   const [step, setStep] = useState(0);
+  const [hasReachedConfirm, setHasReachedConfirm] = useState(false);
   const [mood, setMood] = useState<(typeof MOODS)[number]['key'] | null>(null);
   const [item, setItem] = useState(params.item ?? '');
   const [summaryLine, setSummaryLine] = useState('');
@@ -95,12 +100,11 @@ export default function AddExpenseScreen() {
   const [spentAt, setSpentAt] = useState(new Date());
   const [tempSpentAt, setTempSpentAt] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerPhase, setDatePickerPhase] = useState<'date' | 'time'>('date');
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteBuffer, setPasteBuffer] = useState('');
-  const reviewDelayDays = Array.isArray(account?.reviewDelayDays) ? account!.reviewDelayDays : [account?.reviewDelayDays ?? 3].filter(Boolean) as any;
-
   const applyScanFormPatch = (patch: ScanFormPatch): string[] => {
     const updates: string[] = [];
     if (patch.amountText) {
@@ -236,15 +240,24 @@ export default function AddExpenseScreen() {
 
   const handleDatePickerOpen = () => {
     setTempSpentAt(spentAt);
+    setDatePickerPhase('date');
     setShowDatePicker(true);
   };
 
   const handleDatePickerConfirm = () => {
+    if (datePickerPhase === 'date') {
+      setDatePickerPhase('time');
+      return;
+    }
     setSpentAt(tempSpentAt);
     setShowDatePicker(false);
   };
 
   const handleDatePickerCancel = () => {
+    if (datePickerPhase === 'time') {
+      setDatePickerPhase('date');
+      return;
+    }
     setShowDatePicker(false);
   };
 
@@ -289,12 +302,6 @@ export default function AddExpenseScreen() {
   };
 
   React.useEffect(() => {
-    if (step !== 0) return undefined;
-    const t = setTimeout(() => amountRef.current?.focus(), 150);
-    return () => clearTimeout(t);
-  }, [step]);
-
-  useEffect(() => {
     if (!localImageUri) {
       setPhotoPreviewSize(null);
       return;
@@ -332,6 +339,45 @@ export default function AddExpenseScreen() {
     if (s === 0) return amount > 0;
     return true;
   };
+
+  const jumpToStep = (target: number) => {
+    if (target === LAST_STEP && amount <= 0) {
+      Alert.alert('입력 확인', '금액을 입력해 주세요.');
+      return;
+    }
+    Keyboard.dismiss();
+    setStep(target);
+  };
+
+  useEffect(() => {
+    if (step === LAST_STEP) setHasReachedConfirm(true);
+  }, [step]);
+
+  const renderConfirmEditRow = (
+    label: string,
+    value: string,
+    targetStep: number,
+    valueColor: string = colors.text,
+  ) => (
+    <Pressable
+      key={label}
+      style={({ pressed }) => [
+        styles.confirmRow,
+        { borderBottomColor: colors.border, opacity: pressed ? 0.72 : 1 },
+      ]}
+      onPress={() => jumpToStep(targetStep)}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} 수정`}
+    >
+      <Text style={[styles.confirmKey, { color: colors.textMuted }]}>{label}</Text>
+      <View style={styles.confirmValWrap}>
+        <Text style={[styles.confirmVal, { color: valueColor }]} numberOfLines={4}>
+          {value}
+        </Text>
+        <MaterialIcons name="chevron-right" size={18} color={colors.textMuted} />
+      </View>
+    </Pressable>
+  );
 
   const goNext = () => {
     if (!canAdvanceFromStep(step)) {
@@ -485,24 +531,26 @@ export default function AddExpenseScreen() {
           <View style={[styles.stepStripOnHeader, { backgroundColor: 'rgba(255,255,255,0.14)' }]}>
             {ADD_STEP_BAR_LABELS.map((barLabel, i) => {
               const active = i === step;
-              const done = i < step;
+              const locked = !hasReachedConfirm && i > step;
+              const reachable = hasReachedConfirm || i <= step;
               return (
                 <Pressable
                   key={barLabel}
                   onPress={() => {
-                    if (i < step) setStep(i);
+                    if (hasReachedConfirm) jumpToStep(i);
+                    else if (i < step) jumpToStep(i);
                   }}
-                  disabled={i > step}
+                  disabled={locked}
                   style={({ pressed }) => [
                     styles.stepChip,
                     {
                       borderColor: active ? colors.onPrimary : 'transparent',
                       backgroundColor: active
                         ? colors.onPrimary
-                        : done
+                        : reachable && !active
                           ? 'rgba(255,255,255,0.22)'
                           : 'transparent',
-                      opacity: pressed && i < step ? 0.88 : 1,
+                      opacity: pressed && reachable && !active ? 0.88 : 1,
                     },
                   ]}
                 >
@@ -512,7 +560,7 @@ export default function AddExpenseScreen() {
                       {
                         color: active
                           ? colors.accentCta
-                          : done
+                          : reachable
                             ? colors.onPrimary
                             : headerSubColor,
                       },
@@ -524,7 +572,11 @@ export default function AddExpenseScreen() {
                     style={[
                       styles.stepChipLabel,
                       {
-                        color: active ? colors.accentCta : done ? colors.onPrimary : headerSubColor,
+                        color: active
+                          ? colors.accentCta
+                          : reachable
+                            ? colors.onPrimary
+                            : headerSubColor,
                       },
                     ]}
                     numberOfLines={1}
@@ -549,11 +601,11 @@ export default function AddExpenseScreen() {
         style={styles.container}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: 120 + insets.bottom },
-          (step === 0 || step === 2) && styles.contentNoScroll,
+          { paddingBottom: 120 + insets.bottom + (step === 2 ? 20 : 0) },
+          step === 0 && styles.contentNoScroll,
         ]}
-        scrollEnabled={step !== 0 && step !== 2}
-        bounces={step !== 0 && step !== 2}
+        scrollEnabled={step !== 0}
+        bounces={step !== 0}
         alwaysBounceVertical={false}
         showsVerticalScrollIndicator={false}
       >
@@ -591,9 +643,12 @@ export default function AddExpenseScreen() {
                 ref={amountRef}
                 value={formatAmountInput(amountText)}
                 onChangeText={(t) => setAmountText(unformat(t))}
-                keyboardType="number-pad"
+                {...amountKeyboardProps}
+                onFocus={markFromFocused}
                 placeholder="0"
                 placeholderTextColor={colors.placeholder}
+                blurOnSubmit
+                onSubmitEditing={() => handleKoreanFieldFocus(itemRef)}
                 style={[
                   styles.amountInput,
                   {
@@ -615,10 +670,15 @@ export default function AddExpenseScreen() {
               </View>
               <Text style={[styles.labelThemed, { color: colors.textMuted }]}>메뉴</Text>
               <TextInput
+                ref={itemRef}
                 value={item}
                 onChangeText={setItem}
                 placeholder="예: 아메리카노, 치킨 반마리"
                 placeholderTextColor={colors.placeholder}
+                onFocus={() => handleKoreanFieldFocus(itemRef)}
+                {...koreanTextInputProps}
+                returnKeyType="done"
+                blurOnSubmit
                 style={[
                   styles.input,
                   {
@@ -786,6 +846,7 @@ export default function AddExpenseScreen() {
                     onChangeText={setCustomReason}
                     placeholder="기타 내용"
                     placeholderTextColor={colors.placeholder}
+                    {...koreanTextInputProps}
                     style={[
                       styles.input,
                       {
@@ -801,6 +862,7 @@ export default function AddExpenseScreen() {
                   onChangeText={setReasonDetail}
                   placeholder="상황을 한 줄로"
                   placeholderTextColor={colors.placeholder}
+                  {...koreanTextInputProps}
                   style={[
                     styles.input,
                     {
@@ -836,6 +898,7 @@ export default function AddExpenseScreen() {
                   onChangeText={setSummaryLine}
                   placeholder="예: 배부른데 시켜서 후회"
                   placeholderTextColor={colors.placeholder}
+                  {...koreanTextInputProps}
                   style={[
                     styles.input,
                     {
@@ -867,6 +930,7 @@ export default function AddExpenseScreen() {
                   onChangeText={setTagsText}
                   placeholder="쉼표로 구분"
                   placeholderTextColor={colors.placeholder}
+                  {...koreanTextInputProps}
                   style={[
                     styles.input,
                     {
@@ -893,45 +957,22 @@ export default function AddExpenseScreen() {
             <View style={styles.contextCardBody}>
               <Text style={[styles.contextKicker, { color: colors.textMuted }]}>확인</Text>
               <Text style={[styles.contextTitle, { color: colors.text }]}>이대로 저장할까요?</Text>
-              <View style={{ height: 16 }} />
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>금액</Text>
-                <Text style={[styles.confirmVal, { color: colors.text }]}>₩{amount.toLocaleString()}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>품목</Text>
-                <Text style={[styles.confirmVal, { color: colors.text }]}>{item.trim() || '—'}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>카테고리</Text>
-                <Text style={[styles.confirmVal, { color: colors.text }]}>{categoryLabel}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>시간</Text>
-                <Text style={[styles.confirmVal, { color: colors.textSec }]}>{formatDateTime(spentAt)}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>이유</Text>
-                <Text style={[styles.confirmVal, { color: colors.textSec }]}>{reasonPreview}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>기분</Text>
-                <Text style={[styles.confirmVal, { color: colors.textSec }]}>{moodLabel}</Text>
-              </View>
-              {summaryLine.trim() ? (
-                <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                  <Text style={[styles.confirmKey, { color: colors.textMuted }]}>한줄평</Text>
-                  <Text style={[styles.confirmVal, { color: colors.textSec }]}>{summaryLine.trim()}</Text>
-                </View>
-              ) : null}
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>태그</Text>
-                <Text style={[styles.confirmVal, { color: colors.textSec }]}>
-                  {tagsText.trim() || '—'}
-                </Text>
-              </View>
+              <Text style={[styles.confirmHint, { color: colors.textMuted }]}>
+                수정할 항목을 누르면 해당 단계로 이동해요.
+              </Text>
+              <View style={{ height: 12 }} />
+              {renderConfirmEditRow('금액', `₩${amount.toLocaleString()}`, 0)}
+              {renderConfirmEditRow('품목', item.trim() || '—', 0)}
+              {renderConfirmEditRow('카테고리', categoryLabel, 0)}
+              {renderConfirmEditRow('시간', formatDateTime(spentAt), 1, colors.textSec)}
+              {renderConfirmEditRow('이유', reasonPreview, 2, colors.textSec)}
+              {renderConfirmEditRow('기분', moodLabel, 2, colors.textSec)}
+              {summaryLine.trim()
+                ? renderConfirmEditRow('한줄평', summaryLine.trim(), 2, colors.textSec)
+                : null}
+              {renderConfirmEditRow('태그', tagsText.trim() || '—', 2, colors.textSec)}
               <Text style={[styles.bottomSub, { color: colors.textMuted, marginTop: 14 }]}>
-                저장하면 리뷰 알림이 D+{reviewDelayDays.join(', ')} 에 잡혀요.
+                저장하면 다음 날 0시부터 47시간 59분 안에 평가할 수 있어요. 알림은 설정한 시간에 보내드려요.
               </Text>
             </View>
           </View>
@@ -944,49 +985,62 @@ export default function AddExpenseScreen() {
           <View style={styles.webDatePanel}>
             <View style={styles.datePickerHeader}>
               <Pressable onPress={handleDatePickerCancel}>
-                <Text style={styles.datePickerCancel}>취소</Text>
+                <Text style={styles.datePickerCancel}>
+                  {datePickerPhase === 'time' ? '이전' : '취소'}
+                </Text>
               </Pressable>
-              <Text style={styles.datePickerTitle}>날짜 및 시간 선택</Text>
+              <Text style={styles.datePickerTitle}>
+                {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
+              </Text>
               <Pressable onPress={handleDatePickerConfirm}>
-                <Text style={styles.datePickerConfirm}>완료</Text>
+                <Text style={styles.datePickerConfirm}>
+                  {datePickerPhase === 'date' ? '다음' : '완료'}
+                </Text>
               </Pressable>
             </View>
             <View style={styles.webDateTimeWrap}>
-              <Text style={styles.webDateTimeLabel}>날짜 (연도 → 월 → 일)</Text>
-              {React.createElement('input', {
-                type: 'date',
-                lang: 'ko-KR',
-                value: webDateValue,
-                onChange: (e: any) => handleWebDateChange(e?.target?.value ?? ''),
-                style: {
-                  height: 40,
-                  borderRadius: 10,
-                  border: '1px solid #D1D5DB',
-                  padding: '0 10px',
-                  fontSize: 14,
-                  color: '#111827',
-                  background: '#fff',
-                },
-              })}
-              <Text style={[styles.webDateTimeLabel, { marginTop: 12 }]}>시간 (24시간)</Text>
-              {React.createElement('input', {
-                type: 'time',
-                lang: 'ko-KR',
-                value: webTimeValue,
-                onChange: (e: any) => handleWebTimeChange(e?.target?.value ?? ''),
-                style: {
-                  height: 40,
-                  borderRadius: 10,
-                  border: '1px solid #D1D5DB',
-                  padding: '0 10px',
-                  fontSize: 14,
-                  color: '#111827',
-                  background: '#fff',
-                },
-              })}
-              <Text style={styles.webDatePreview}>
-                {tempSpentAt.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' })}
-              </Text>
+              {datePickerPhase === 'date' ? (
+                <>
+                  <Text style={styles.webDateTimeLabel}>날짜</Text>
+                  {React.createElement('input', {
+                    type: 'date',
+                    lang: 'ko-KR',
+                    value: webDateValue,
+                    onChange: (e: any) => handleWebDateChange(e?.target?.value ?? ''),
+                    style: {
+                      height: 40,
+                      borderRadius: 10,
+                      border: '1px solid #D1D5DB',
+                      padding: '0 10px',
+                      fontSize: 14,
+                      color: '#111827',
+                      background: '#fff',
+                    },
+                  })}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.webDateTimeLabel}>시간 (24시간)</Text>
+                  {React.createElement('input', {
+                    type: 'time',
+                    lang: 'ko-KR',
+                    value: webTimeValue,
+                    onChange: (e: any) => handleWebTimeChange(e?.target?.value ?? ''),
+                    style: {
+                      height: 40,
+                      borderRadius: 10,
+                      border: '1px solid #D1D5DB',
+                      padding: '0 10px',
+                      fontSize: 14,
+                      color: '#111827',
+                      background: '#fff',
+                    },
+                  })}
+                  <Text style={styles.webDatePreview}>
+                    {tempSpentAt.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' })}
+                  </Text>
+                </>
+              )}
             </View>
           </View>
         )}
@@ -998,25 +1052,29 @@ export default function AddExpenseScreen() {
               <View style={styles.datePickerContent}>
                 <View style={styles.datePickerHeader}>
                   <Pressable onPress={handleDatePickerCancel}>
-                    <Text style={styles.datePickerCancel}>취소</Text>
+                    <Text style={styles.datePickerCancel}>
+                      {datePickerPhase === 'time' ? '이전' : '취소'}
+                    </Text>
                   </Pressable>
-                  <Text style={styles.datePickerTitle}>날짜 및 시간 선택</Text>
+                  <Text style={styles.datePickerTitle}>
+                    {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
+                  </Text>
                   <Pressable onPress={handleDatePickerConfirm}>
-                    <Text style={styles.datePickerConfirm}>완료</Text>
+                    <Text style={styles.datePickerConfirm}>
+                      {datePickerPhase === 'date' ? '다음' : '완료'}
+                    </Text>
                   </Pressable>
                 </View>
-                <ScrollView
-                  style={{ maxHeight: 440 }}
-                  contentContainerStyle={{ paddingBottom: 20 }}
-                  keyboardShouldPersistTaps="handled"
-                >
+                <View style={{ paddingBottom: 20 }}>
                   <SpentAtDateTimePickers
+                    phase={datePickerPhase}
                     value={tempSpentAt}
                     onChange={setTempSpentAt}
+                    onDateSelected={() => setDatePickerPhase('time')}
                     textColor={colors.text}
                     themeVariant={isDark ? 'dark' : 'light'}
                   />
-                </ScrollView>
+                </View>
               </View>
             </View>
           </Modal>
@@ -1313,13 +1371,21 @@ const styles = StyleSheet.create({
   confirmRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  confirmHint: { fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 6 },
   confirmKey: { fontSize: 13, fontWeight: '700', width: 72 },
-  confirmVal: { flex: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
+  confirmValWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  confirmVal: { flexShrink: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
 
   extrasToggle: {
     flexDirection: 'row',
@@ -1376,7 +1442,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     paddingHorizontal: 12,
     backgroundColor: '#fff',
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '400' : '700',
     color: '#111827',
   },
 

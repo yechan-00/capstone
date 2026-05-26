@@ -1,25 +1,36 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Insights, InsightsWindow } from '@/lib/types';
 import { toMonthlyIncomeKrw } from '@/lib/accountSettings';
+import { toFoodBudgetKrw } from '@/lib/budgetPeriod';
 import { insightsService } from '@/services/insightsService';
 import { useAuth } from './useAuth';
 
-function windowForMode(periodMode: 'month' | 'year'): InsightsWindow {
+export function currentInsightsWindow(mode: 'month' | 'year' = 'month'): InsightsWindow {
   const now = new Date();
-  if (periodMode === 'year') {
+  if (mode === 'year') {
     return { mode: 'year', year: now.getFullYear() };
   }
   return { mode: 'month', year: now.getFullYear(), monthIndex: now.getMonth() };
 }
 
-export const useInsights = (periodMode: 'month' | 'year') => {
+export const useInsights = (window: InsightsWindow) => {
   const { account } = useAuth();
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
   const loadInFlightRef = useRef(false);
-  const prevModeRef = useRef(periodMode);
+  const prevWindowKeyRef = useRef('');
+  const insightsRef = useRef<Insights | null>(null);
+
+  useEffect(() => {
+    insightsRef.current = insights;
+  }, [insights]);
+
+  const windowKey =
+    window.mode === 'month'
+      ? `${window.mode}:${window.year}:${window.monthIndex}`
+      : `${window.mode}:${window.year}`;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -29,23 +40,31 @@ export const useInsights = (periodMode: 'month' | 'year') => {
   }, []);
 
   useEffect(() => {
-    if (prevModeRef.current !== periodMode) {
+    if (prevWindowKeyRef.current !== windowKey) {
       setInsights(null);
-      prevModeRef.current = periodMode;
+      prevWindowKeyRef.current = windowKey;
     }
-  }, [periodMode]);
+  }, [windowKey]);
 
-  const loadInsights = useCallback(async () => {
+  const loadInsights = useCallback(async (options?: { background?: boolean }) => {
     if (!account) return;
     if (loadInFlightRef.current) return;
     loadInFlightRef.current = true;
 
+    const background = options?.background ?? insightsRef.current !== null;
+
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       setError(null);
-      const w = windowForMode(periodMode);
       const monthlyIncomeKrw = toMonthlyIncomeKrw(account);
-      const data = await insightsService.getInsights(account.id, w, monthlyIncomeKrw);
+      const foodBudgetKrw = toFoodBudgetKrw(account);
+      const data = await insightsService.getInsights(
+        account.id,
+        window,
+        account,
+        monthlyIncomeKrw,
+        foodBudgetKrw,
+      );
       if (mountedRef.current) {
         setInsights(data);
       }
@@ -59,7 +78,7 @@ export const useInsights = (periodMode: 'month' | 'year') => {
         setLoading(false);
       }
     }
-  }, [account, periodMode]);
+  }, [account, window]);
 
   useEffect(() => {
     if (!account) {
@@ -75,6 +94,6 @@ export const useInsights = (periodMode: 'month' | 'year') => {
     insights,
     loading,
     error,
-    refresh: loadInsights,
+    refresh: () => loadInsights({ background: true }),
   };
 };

@@ -111,17 +111,18 @@ export function ColorPickerModal({ visible, initialColor, onClose, onSelect, isD
   const textColor = isDark ? '#E2E8F0' : '#1c2434';
   const borderColor = isDark ? '#2A3548' : '#e4e8f0';
 
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      {/* 배경 딤 */}
-      <TouchableOpacity
-        style={styles.backdrop}
-        activeOpacity={1}
-        onPress={onClose}
-      />
+  if (!visible) return null;
 
-      {/* 피커 시트 */}
-      <View style={[styles.sheet, { backgroundColor: bg, borderColor }]}>
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalRoot}>
+        <TouchableOpacity
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+
+        <View style={[styles.sheet, { backgroundColor: bg, borderColor }]}>
         <Text style={[styles.title, { color: textColor }]}>색상 선택</Text>
 
         {/* SV 패널 */}
@@ -198,21 +199,19 @@ export function ColorPickerModal({ visible, initialColor, onClose, onSelect, isD
             <Text style={[styles.btnText, { color: '#fff', fontWeight: '900' }]}>적용</Text>
           </TouchableOpacity>
         </View>
+        </View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderTopWidth: 1,

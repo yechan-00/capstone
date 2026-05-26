@@ -4,7 +4,7 @@ import { expenseService } from '@/services/expenseService';
 import { useAuth } from './useAuth';
 
 export const useExpenses = () => {
-  const { account } = useAuth();
+  const { account, user } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -84,13 +84,14 @@ export const useExpenses = () => {
   }, [account, loadExpenses]);
 
   const createExpense = useCallback(
-    async (expense: Omit<Expense, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> => {
-      if (!account) throw new Error('계정이 없습니다.');
+    async (expense: Omit<Expense, 'id' | 'createdAt' | 'updatedAt' | 'accountId' | 'userId'>): Promise<string> => {
+      if (!account || !user) throw new Error('계정이 없습니다.');
 
       try {
         const expenseId = await expenseService.create({
           ...expense,
           accountId: account.id,
+          userId: user.uid,
         });
         // 목록 새로고침이 느리거나 타임아웃돼도 저장 완료 UI는 막지 않음
         void loadExpenses();
@@ -99,7 +100,7 @@ export const useExpenses = () => {
         throw err instanceof Error ? err : new Error('지출을 추가하는데 실패했습니다.');
       }
     },
-    [account, loadExpenses]
+    [account, user, loadExpenses]
   );
 
   const updateExpense = useCallback(

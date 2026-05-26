@@ -1,14 +1,25 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
-import type { ScheduleType } from '@/lib/types';
-import { scheduleDueLabel } from '@/lib/scheduleLabels';
+import type { ReviewSchedule, ScheduleType } from '@/lib/types';
+import { scheduleDueLabel, scheduleRemainingLabel } from '@/lib/scheduleLabels';
 import { useTheme } from '@/theme/ThemeContext';
 
-type PendingSchedule = { id: string; expenseId: string; dueType: ScheduleType; title?: string; amount?: number; dueAt?: Date };
+type PendingSchedule = {
+  id: string;
+  expenseId: string;
+  dueType: ScheduleType;
+  title?: string;
+  amount?: number;
+  dueAt?: Date;
+  schedule?: ReviewSchedule;
+  remainingLabel?: string;
+};
 
 export function ReviewActionCard({ item, onPressReview }: { item: PendingSchedule; onPressReview: (item: PendingSchedule) => void }) {
   const { colors, isDark } = useTheme();
-  const dueBadge = scheduleDueLabel(item.dueType);
+  const dueBadge =
+    item.remainingLabel ??
+    (item.schedule ? scheduleRemainingLabel(item.schedule) : scheduleDueLabel(item.dueType));
   const amountLabel = item.amount != null ? `₩${item.amount.toLocaleString()}` : '금액 정보 없음';
   const elevated =
     !isDark && Platform.OS !== 'web'
@@ -31,7 +42,7 @@ export function ReviewActionCard({ item, onPressReview }: { item: PendingSchedul
         <Text style={[styles.amount, { color: colors.primary }]}>{amountLabel}</Text>
         <View style={styles.badgeRow}>
           <View style={[styles.badge, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
-            <Text style={[styles.badgeText, { color: colors.textSec }]}>{dueBadge} 리뷰</Text>
+            <Text style={[styles.badgeText, { color: colors.textSec }]}>{dueBadge}</Text>
           </View>
         </View>
       </View>

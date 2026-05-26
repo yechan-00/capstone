@@ -88,7 +88,6 @@ export function SatisfactionLevelPicker({
               },
             ]}
           >
-            <Text style={[styles.stars, { color: c.text }]}>{'★'.repeat(row.stars)}</Text>
             <Text style={[styles.label, { color: c.text }]}>{row.label}</Text>
           </Pressable>
         );
@@ -100,14 +99,12 @@ export function SatisfactionLevelPicker({
 const styles = StyleSheet.create({
   wrap: { gap: 10 },
   row: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'flex-start',
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 2,
   },
-  stars: { fontSize: 15, letterSpacing: -2, fontWeight: '900' },
-  label: { fontSize: 16, fontWeight: '900', flex: 1 },
+  label: { fontSize: 16, fontWeight: '900', textAlign: 'left', alignSelf: 'stretch' },
 });

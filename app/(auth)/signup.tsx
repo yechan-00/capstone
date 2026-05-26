@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { showAlert } from '@/utils/alert';
 import { validateEmail, validatePassword } from '@/utils/validation';
+import { mapFirebaseAuthError } from '@/utils/firebaseAuthErrors';
 
 const NAVY = '#1B2D5B';
 
@@ -40,7 +41,7 @@ export default function SignUpScreen() {
         { text: 'OK', onPress: () => router.replace('/(tabs)') },
       ]);
     } catch (error: any) {
-      showAlert('회원가입 실패', error.message || '회원가입에 실패했습니다.');
+      showAlert('회원가입 실패', mapFirebaseAuthError(error, '회원가입에 실패했습니다.'));
     } finally {
       setLoading(false);
     }

@@ -9,9 +9,14 @@ import {
   CategoryInsight,
   MoodInsight,
   TimeOfDayInsight,
+  type Account,
+  type FoodBudgetInsight,
   type IncomeInsight,
   type InsightsWindow,
 } from '@/lib/types';
+import { budgetPeriodForInsightsWindow } from '@/lib/budgetPeriod';
+import { normalizeExpenseMood } from '@/lib/expenseMood';
+import { getTimeOfDay } from '@/utils/time';
 
 function buildIncomeInsight(
   totalSpendKrw: number,
@@ -31,9 +36,35 @@ function buildIncomeInsight(
     isOverBudget: remainingKrw < 0,
   };
 }
-import { getTimeOfDay } from '@/utils/time';
 
-function boundsForInsightsWindow(w: InsightsWindow): { start: Date; end: Date } {
+function buildFoodBudgetInsight(
+  totalSpendKrw: number,
+  foodBudgetKrw: number,
+  window: InsightsWindow,
+  account: Account | null,
+): FoodBudgetInsight | null {
+  if (foodBudgetKrw <= 0) return null;
+  const period = budgetPeriodForInsightsWindow(window, account);
+  const budgetKrw = window.mode === 'year' ? foodBudgetKrw * 12 : foodBudgetKrw;
+  const spendRatioPercent = budgetKrw > 0 ? (totalSpendKrw / budgetKrw) * 100 : 0;
+  const remainingKrw = budgetKrw - totalSpendKrw;
+  return {
+    budgetKrw,
+    totalSpendKrw,
+    spendRatioPercent,
+    remainingKrw,
+    isOverBudget: remainingKrw < 0,
+    periodLabel: period.label,
+    periodMode: period.mode,
+    savingsPercentile: null,
+  };
+}
+
+function boundsForInsightsWindow(w: InsightsWindow, account: Account | null): { start: Date; end: Date } {
+  if (w.mode === 'month' && account?.budgetPeriodMode === 'payday') {
+    const period = budgetPeriodForInsightsWindow(w, account);
+    return { start: period.start, end: period.end };
+  }
   if (w.mode === 'year') {
     return {
       start: new Date(w.year, 0, 1, 0, 0, 0, 0),
@@ -49,10 +80,12 @@ export const insightsService = {
   async getInsights(
     accountId: string,
     window: InsightsWindow,
+    account: Account | null,
     monthlyIncomeKrw = 0,
+    foodBudgetKrw = 0,
   ): Promise<Insights> {
     try {
-      const { start: startDate, end: endDate } = boundsForInsightsWindow(window);
+      const { start: startDate, end: endDate } = boundsForInsightsWindow(window, account);
 
       const withTimeout = async <T>(promise: Promise<T>, ms: number, label: string) => {
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -89,9 +122,14 @@ export const insightsService = {
     const expenseMap = new Map(periodExpenses.map((e) => [e.id, e]));
 
     const weekdayExpenseCounts = [0, 0, 0, 0, 0, 0, 0];
+    const weekdayCategoryCounts: Array<Record<string, number>> = Array.from({ length: 7 }, () => ({}));
     for (const e of periodExpenses) {
       const d = e.spentAt.getDay();
       weekdayExpenseCounts[d] += 1;
+      const canonical = e.category === 'food' ? 'takeout' : e.category;
+      if (canonical === 'delivery' || canonical === 'cafe' || canonical === 'takeout') {
+        weekdayCategoryCounts[d][canonical] = (weekdayCategoryCounts[d][canonical] ?? 0) + 1;
+      }
     }
 
     // 카테고리별 인사이트
@@ -117,6 +155,7 @@ export const insightsService = {
 
     const totalSpendKrw = periodExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
     const incomeInsight = buildIncomeInsight(totalSpendKrw, monthlyIncomeKrw, window);
+    const foodBudgetInsight = buildFoodBudgetInsight(totalSpendKrw, foodBudgetKrw, window, account);
 
     // 패턴 분석
     const patterns = this.generatePatterns(
@@ -124,6 +163,7 @@ export const insightsService = {
       periodExpenses.length,
       regretReviews.length,
       incomeInsight,
+      foodBudgetInsight,
       window.mode,
     );
 
@@ -134,6 +174,7 @@ export const insightsService = {
         moodInsights,
         timeOfDayInsights,
         weekdayExpenseCounts,
+        weekdayCategoryCounts,
         totalExpenses: periodExpenses.length,
         totalSpendKrw,
         totalRegrets: regretReviews.length,
@@ -142,6 +183,7 @@ export const insightsService = {
             ? (regretReviews.length / periodExpenses.length) * 100
             : 0,
         incomeInsight,
+        foodBudgetInsight,
         patterns,
       };
     } catch (error: any) {
@@ -199,15 +241,17 @@ export const insightsService = {
     const moodMap = new Map<ExpenseMood, { total: number; regrets: number }>();
 
     expenses.forEach((expense) => {
-      const current = moodMap.get(expense.mood) || { total: 0, regrets: 0 };
-      moodMap.set(expense.mood, { ...current, total: current.total + 1 });
+      const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
+      const current = moodMap.get(mood) || { total: 0, regrets: 0 };
+      moodMap.set(mood, { ...current, total: current.total + 1 });
     });
 
     regretReviews.forEach((review) => {
       const expense = expenseMap.get(review.expenseId);
       if (expense) {
-        const current = moodMap.get(expense.mood) || { total: 0, regrets: 0 };
-        moodMap.set(expense.mood, { ...current, regrets: current.regrets + 1 });
+        const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
+        const current = moodMap.get(mood) || { total: 0, regrets: 0 };
+        moodMap.set(mood, { ...current, regrets: current.regrets + 1 });
       }
     });
 
@@ -257,9 +301,23 @@ export const insightsService = {
     totalExpenses: number,
     totalRegrets: number,
     incomeInsight: IncomeInsight | null,
+    foodBudgetInsight: FoodBudgetInsight | null,
     periodMode: 'month' | 'year',
   ): string[] {
     const patterns: string[] = [];
+
+    if (foodBudgetInsight && foodBudgetInsight.totalSpendKrw > 0) {
+      const pct = foodBudgetInsight.spendRatioPercent;
+      if (foodBudgetInsight.isOverBudget) {
+        patterns.push(
+          `식비 예산 대비 ${pct.toFixed(0)}%를 썼어요. ${Math.abs(foodBudgetInsight.remainingKrw).toLocaleString()}원을 초과했습니다.`,
+        );
+      } else if (foodBudgetInsight.remainingKrw > 0) {
+        patterns.push(
+          `식비 예산에서 ${foodBudgetInsight.remainingKrw.toLocaleString()}원이 남았어요. (소비율 ${pct.toFixed(0)}%)`,
+        );
+      }
+    }
 
     if (incomeInsight && incomeInsight.totalSpendKrw > 0) {
       const pct = incomeInsight.spendRatioPercent;

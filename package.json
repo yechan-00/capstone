@@ -4,10 +4,13 @@
   "main": "expo-router/entry",
   "scripts": {
     "postinstall": "patch-package",
-    "start": "expo start",
+    "prestart": "node scripts/ensure-ascii-path.mjs",
+    "start": "bash scripts/start-expo.sh",
+    "start:tunnel": "bash scripts/start-expo-tunnel.sh",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -19,6 +22,7 @@
     "expo-clipboard": "~8.0.8",
     "expo-dev-client": "~6.0.20",
     "expo-file-system": "~19.0.22",
+    "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",

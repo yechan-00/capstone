@@ -1,4 +1,5 @@
-import type { ScheduleType } from '@/lib/types';
+import type { ReviewSchedule, ScheduleType } from '@/lib/types';
+import { formatReviewWindowRemaining } from '@/lib/reviewWindow';
 
 export function scheduleDelayDays(type: ScheduleType): number {
   switch (type) {
@@ -17,7 +18,12 @@ export function scheduleDelayDays(type: ScheduleType): number {
   }
 }
 
-/** 카드·목록용 짧은 설명 */
+/** 평가 대기 카드 — 남은 시간 */
+export function scheduleRemainingLabel(schedule: ReviewSchedule): string {
+  return formatReviewWindowRemaining(schedule);
+}
+
+/** 카드·목록용 짧은 설명 (레거시 D+N) */
 export function scheduleDueLabel(type: ScheduleType): string {
   switch (type) {
     case 'immediate':

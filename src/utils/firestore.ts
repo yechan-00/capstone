@@ -1,4 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
+import { ReviewSchedule } from '@/lib/types';
+import { resolveDocumentUserId } from '@/lib/accountId';
+import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
 
 /**
  * Firestore Timestamp를 Date로 변환하는 헬퍼 함수
@@ -9,25 +12,35 @@ export const timestampToDate = (timestamp: Timestamp | Date | undefined | null):
   return timestamp.toDate();
 };
 
-/**
- * Firestore 문서 데이터를 타입으로 변환하는 제네릭 헬퍼
- */
-export const mapDocToData = <T extends { id: string }>(
-  doc: { id: string; data: () => any },
-  dateFields: string[] = ['createdAt', 'updatedAt']
-): T => {
-  const data = doc.data();
-  const mapped: any = {
-    id: doc.id,
+export function mapScheduleDoc(docSnap: { id: string; data: () => Record<string, unknown> }): ReviewSchedule {
+  const data = docSnap.data();
+  const userId = resolveDocumentUserId(data as { accountId?: string; userId?: string }) ?? '';
+  return {
+    id: docSnap.id,
     ...data,
-  };
+    userId,
+    dueAt: timestampToDate(data.dueAt as Timestamp | Date | undefined),
+    expiresAt: data.expiresAt
+      ? timestampToDate(data.expiresAt as Timestamp | Date | undefined)
+      : undefined,
+    createdAt: timestampToDate(data.createdAt as Timestamp | Date | undefined),
+    completedAt: timestampToDate(data.completedAt as Timestamp | Date | undefined),
+  } as ReviewSchedule;
+}
 
-  // 날짜 필드 변환
-  dateFields.forEach((field) => {
-    if (data[field]) {
-      mapped[field] = timestampToDate(data[field]);
-    }
-  });
-
-  return mapped as T;
-};
+export function mapReviewDoc<
+  T extends { id: string; reviewedAt: Date; createdAt: Date; satisfaction: number; userId: string },
+>(docSnap: { id: string; data: () => Record<string, unknown> }): T {
+  const data = docSnap.data();
+  const userId =
+    resolveDocumentUserId(data as { accountId?: string; userId?: string }) ??
+    (typeof data.reviewerUserId === 'string' ? data.reviewerUserId : '');
+  return {
+    id: docSnap.id,
+    ...data,
+    userId,
+    reviewedAt: timestampToDate(data.reviewedAt as Timestamp | Date | undefined),
+    createdAt: timestampToDate(data.createdAt as Timestamp | Date | undefined),
+    satisfaction: normalizeReviewSatisfaction(data.satisfaction),
+  } as T;
+}

@@ -38,6 +38,11 @@ import { parsePastedExpenseText } from '@/services/expenseInput/fromPastedText';
 import { uploadExpenseImage } from '@/services/storageService';
 import { scheduleRiskAwarenessAfterExpense } from '@/services/riskSpendingNotification';
 import { useTheme } from '@/theme/ThemeContext';
+import {
+  amountKeyboardProps,
+  koreanTextInputProps,
+  useIosKoreanFieldTransition,
+} from '@/lib/koreanTextInput';
 
 const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
 
@@ -75,6 +80,8 @@ export default function EditExpenseScreen() {
   const { colors, isDark } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const amountRef = useRef<TextInput>(null);
+  const itemRef = useRef<TextInput>(null);
+  const { markFromFocused, handleKoreanFieldFocus } = useIosKoreanFieldTransition(amountRef);
   /** 카드 좌우 패딩·액센트 바 제외한 미리보기 최대 너비 */
   const photoPreviewMaxWidth = windowWidth - 56;
   const [photoPreviewSize, setPhotoPreviewSize] = useState<{ width: number; height: number } | null>(
@@ -101,8 +108,6 @@ export default function EditExpenseScreen() {
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteBuffer, setPasteBuffer] = useState('');
-  const reviewDelayDays = Array.isArray(account?.reviewDelayDays) ? account!.reviewDelayDays : [account?.reviewDelayDays ?? 3].filter(Boolean) as any;
-
   // 기존 소비 데이터 불러오기
   React.useEffect(() => {
     if (!id) return;
@@ -630,9 +635,12 @@ export default function EditExpenseScreen() {
                 ref={amountRef}
                 value={formatAmountInput(amountText)}
                 onChangeText={(t) => setAmountText(unformat(t))}
-                keyboardType="number-pad"
+                {...amountKeyboardProps}
+                onFocus={markFromFocused}
                 placeholder="0"
                 placeholderTextColor={colors.placeholder}
+                blurOnSubmit
+                onSubmitEditing={() => handleKoreanFieldFocus(itemRef)}
                 style={[
                   styles.amountInput,
                   {
@@ -654,10 +662,15 @@ export default function EditExpenseScreen() {
               </View>
               <Text style={[styles.labelThemed, { color: colors.textMuted }]}>메뉴</Text>
               <TextInput
+                ref={itemRef}
                 value={item}
                 onChangeText={setItem}
                 placeholder="예: 아메리카노, 치킨 반마리"
                 placeholderTextColor={colors.placeholder}
+                onFocus={() => handleKoreanFieldFocus(itemRef)}
+                {...koreanTextInputProps}
+                returnKeyType="done"
+                blurOnSubmit
                 style={[
                   styles.input,
                   {
@@ -970,7 +983,7 @@ export default function EditExpenseScreen() {
                 </Text>
               </View>
               <Text style={[styles.bottomSub, { color: colors.textMuted, marginTop: 14 }]}>
-                저장하면 리뷰 알림이 D+{reviewDelayDays.join(', ')} 에 잡혀요.
+                저장하면 다음 날 0시부터 47시간 59분 안에 평가할 수 있어요. 알림은 설정한 시간에 보내드려요.
               </Text>
             </View>
           </View>

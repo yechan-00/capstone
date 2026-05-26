@@ -28,6 +28,17 @@ import { useTheme } from '@/theme/ThemeContext';
 
 
 import type { Expense, ExpenseCategory, Review, ReviewSchedule, ScheduleType } from '@/lib/types';
+import { expenseCardTitle } from '@/lib/expenseDisplay';
+import { scheduleRemainingLabel } from '@/lib/scheduleLabels';
+import { categoryDotColor } from '@/lib/categoryColors';
+import {
+  budgetPeriodForMonth,
+  currentBudgetPeriod,
+  formatBudgetPeriodRange,
+  isPaydayCell,
+  resolveBudgetPeriodMode,
+  toFoodBudgetKrw,
+} from '@/lib/budgetPeriod';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -49,6 +60,7 @@ export default function HomeScreen() {
     title?: string;
     amount?: number;
     dueAt?: Date;
+    remainingLabel?: string;
   } | null>(null);
   const [nextDueInDays, setNextDueInDays] = React.useState<number | undefined>(undefined);
   const [currentMonth, setCurrentMonth] = React.useState(() => {
@@ -80,17 +92,42 @@ export default function HomeScreen() {
   const pendingBusyRef = React.useRef(false);
   const monthBusyRef = React.useRef(false);
 
+  const budgetPeriod = React.useMemo(() => {
+    if (!account) {
+      return budgetPeriodForMonth(currentMonth.getFullYear(), currentMonth.getMonth(), null);
+    }
+    const now = new Date();
+    const viewingCurrentMonth =
+      currentMonth.getFullYear() === now.getFullYear() &&
+      currentMonth.getMonth() === now.getMonth();
+    if (resolveBudgetPeriodMode(account) === 'payday' && viewingCurrentMonth) {
+      return currentBudgetPeriod(account, now);
+    }
+    return budgetPeriodForMonth(currentMonth.getFullYear(), currentMonth.getMonth(), account);
+  }, [currentMonth, account?.budgetPeriodMode, account?.paydayDayOfMonth, account]);
+
+  const calendarExpenses = React.useMemo(() => {
+    const y = currentMonth.getFullYear();
+    const m = currentMonth.getMonth();
+    return expenses.filter((e) => e.spentAt.getFullYear() === y && e.spentAt.getMonth() === m);
+  }, [expenses, currentMonth]);
+
+  const periodExpenses = React.useMemo(
+    () => expenses.filter((e) => e.spentAt >= budgetPeriod.start && e.spentAt <= budgetPeriod.end),
+    [expenses, budgetPeriod],
+  );
+
   const isOffline = error?.message?.toLowerCase().includes('offline');
   const expenseMapByDay = React.useMemo(() => {
     const map = new Map<string, Expense[]>();
-    for (const e of expenses) {
+    for (const e of calendarExpenses) {
       const key = toDayKey(e.spentAt);
       const arr = map.get(key) ?? [];
       arr.push(e);
       map.set(key, arr);
     }
     return map;
-  }, [expenses]);
+  }, [calendarExpenses]);
 
   const sortedExpensesByDayKey = React.useMemo(() => {
     const out = new Map<string, Expense[]>();
@@ -105,9 +142,16 @@ export default function HomeScreen() {
     return sortedExpensesByDayKey.get(detailDayKey) ?? [];
   }, [detailDayKey, sortedExpensesByDayKey]);
 
-  const monthCategoryTotals = React.useMemo(() => summarizeMonthByCategory(expenses), [expenses]);
+  const monthCategoryTotals = React.useMemo(() => summarizeMonthByCategory(periodExpenses), [periodExpenses]);
   const monthTotalAmount = monthCategoryTotals.total;
-  const activeDaysCount = expenseMapByDay.size;
+  const foodBudgetKrw = account ? toFoodBudgetKrw(account) : 0;
+  const foodBudgetRemaining = foodBudgetKrw > 0 ? foodBudgetKrw - monthTotalAmount : null;
+  const periodDayKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const e of periodExpenses) keys.add(toDayKey(e.spentAt));
+    return keys.size;
+  }, [periodExpenses]);
+  const activeDaysCount = periodDayKeys;
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -197,8 +241,13 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
       if (!silent) setLoading(true);
       setError(null);
 
-      const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 0, 0, 0, 0);
-      const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59, 999);
+      const y = currentMonth.getFullYear();
+      const m = currentMonth.getMonth();
+      const calStart = new Date(y, m, 1, 0, 0, 0, 0);
+      const calEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
+      const period = budgetPeriodForMonth(y, m, account);
+      const start = new Date(Math.min(calStart.getTime(), period.start.getTime()));
+      const end = new Date(Math.max(calEnd.getTime(), period.end.getTime()));
       const data = await expenseService.getByAccountIdInRange(account.id, start, end);
       setExpenses(data);
       try {
@@ -209,7 +258,8 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         setReviewsByExpenseId(revMap);
         const pendMap = await scheduleService.getEarliestPendingScheduleByExpenseIds(
           account.id,
-          data.map((e) => e.id)
+          data.map((e) => e.id),
+          { includePastGraceWindow: true },
         );
         setPendingScheduleByExpenseId(pendMap);
       } catch {
@@ -246,9 +296,10 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           id: schedule.id,
           expenseId: schedule.expenseId,
           dueType: schedule.type,
-          title: expense?.reason,
+          title: expenseCardTitle(expense),
           amount: expense?.amount,
           dueAt: schedule.dueAt,
+          remainingLabel: scheduleRemainingLabel(schedule),
         });
         setNextDueInDays(undefined);
         return;
@@ -410,8 +461,14 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         >
           <View style={styles.breakdownHeader}>
             <View style={styles.breakdownHeaderLeft}>
-              <Text style={[styles.breakdownTitle, { color: colors.text }]}>이번 달 소비</Text>
-              <Text style={[styles.breakdownSubtitle, { color: colors.textMuted }]}>{formatMonth(currentMonth)}</Text>
+              <Text style={[styles.breakdownTitle, { color: colors.text }]}>
+                {resolveBudgetPeriodMode(account) === 'payday' ? '식비 주기' : '이번 달 소비'}
+              </Text>
+              <Text style={[styles.breakdownSubtitle, { color: colors.textMuted }]}>
+                {resolveBudgetPeriodMode(account) === 'payday'
+                  ? formatBudgetPeriodRange(budgetPeriod.start, budgetPeriod.end)
+                  : formatMonth(currentMonth)}
+              </Text>
             </View>
             <View style={styles.breakdownHeaderRight}>
               <View style={[styles.daysPill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
@@ -432,10 +489,30 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           </View>
 
           {monthBreakdownCollapsed ? (
-            <Text style={[styles.breakdownCollapsedSummary, { color: colors.textSec }]} numberOfLines={2}>
-              합계 {monthTotalAmount.toLocaleString()}원 · 외식(포장) {monthCategoryTotals.takeout.toLocaleString()}원 · 배달{' '}
-              {monthCategoryTotals.delivery.toLocaleString()}원 · 카페 {monthCategoryTotals.cafe.toLocaleString()}원
-            </Text>
+            <View style={styles.breakdownCollapsedBlock}>
+              <View style={styles.breakdownCollapsedTotalRow}>
+                <Text style={[styles.breakdownCollapsedTotalLabel, { color: colors.text }]}>합계</Text>
+                <Text style={[styles.breakdownCollapsedTotalAmount, { color: colors.primary }]}>
+                  {monthTotalAmount.toLocaleString()}원
+                </Text>
+              </View>
+              <View style={styles.breakdownCollapsedCatsRow}>
+                {(
+                  [
+                    { key: 'takeout' as const, label: '포장', amount: monthCategoryTotals.takeout, cat: 'takeout' as ExpenseCategory },
+                    { key: 'delivery' as const, label: '배달', amount: monthCategoryTotals.delivery, cat: 'delivery' as ExpenseCategory },
+                    { key: 'cafe' as const, label: '카페', amount: monthCategoryTotals.cafe, cat: 'cafe' as ExpenseCategory },
+                  ] as const
+                ).map((row) => (
+                  <View key={row.key} style={styles.breakdownCollapsedCatCell}>
+                    <View style={[styles.breakdownDot, { backgroundColor: categoryDotColor(row.cat) }]} />
+                    <Text style={[styles.breakdownCollapsedCatText, { color: colors.textSec }]} numberOfLines={1}>
+                      {row.label} {row.amount.toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
           ) : (
             <>
               <View style={[styles.breakdownDivider, { backgroundColor: colors.border }]} />
@@ -449,7 +526,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               ).map((row) => (
                 <View key={row.key} style={styles.breakdownRow}>
                   <View style={styles.breakdownRowLeft}>
-                    <View style={[styles.breakdownDot, { backgroundColor: categoryAccent(row.cat) }]} />
+                    <View style={[styles.breakdownDot, { backgroundColor: categoryDotColor(row.cat) }]} />
                     <Text style={[styles.breakdownRowLabel, { color: colors.textSec }]}>{row.label}</Text>
                   </View>
                   <Text style={[styles.breakdownRowAmount, { color: colors.text }]}>{row.amount.toLocaleString()}원</Text>
@@ -462,6 +539,18 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                 <Text style={[styles.breakdownTotalLabel, { color: colors.text }]}>합계</Text>
                 <Text style={[styles.breakdownTotalAmount, { color: colors.primary }]}>{monthTotalAmount.toLocaleString()}원</Text>
               </View>
+              {foodBudgetRemaining != null ? (
+                <Text
+                  style={[
+                    styles.breakdownBudgetHint,
+                    { color: foodBudgetRemaining >= 0 ? colors.success : colors.logoutText },
+                  ]}
+                >
+                  {foodBudgetRemaining >= 0
+                    ? `식비 예산 잔여 ${foodBudgetRemaining.toLocaleString()}원 / ${foodBudgetKrw.toLocaleString()}원`
+                    : `식비 예산 초과 ${Math.abs(foodBudgetRemaining).toLocaleString()}원`}
+                </Text>
+              ) : null}
             </>
           )}
         </View>
@@ -543,6 +632,9 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               const dow = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), cell).getDay();
               const isSun = dow === 0;
               const isSat = dow === 6;
+              const isPayday =
+                cell != null &&
+                isPaydayCell(currentMonth.getFullYear(), currentMonth.getMonth(), cell, account);
               return (
                 <Pressable
                   key={key}
@@ -554,6 +646,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                       styles.dayNumCircle,
                       active && { backgroundColor: colors.primary },
                       today && !active && { borderWidth: 2, borderColor: colors.primary },
+                      isPayday && !active && { borderWidth: 2, borderColor: '#e11d48' },
                     ]}
                   >
                     <Text
@@ -626,8 +719,9 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         ) : null}
       </ScrollView>
 
+      {detailDayKey !== null ? (
       <Modal
-        visible={detailDayKey !== null}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setDetailDayKey(null)}
@@ -666,15 +760,10 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                 </View>
               ) : (
                 <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-                  {(() => {
-                    const reviewDueCutoffMs = Date.now();
-                    return detailDayExpenses.map((item, index) => {
+                  {detailDayExpenses.map((item, index) => {
                     const itemReview = reviewsByExpenseId.get(item.id);
                     const pendingSched = pendingScheduleByExpenseId.get(item.id);
-                    const canStartReview =
-                      !itemReview &&
-                      pendingSched != null &&
-                      pendingSched.dueAt.getTime() <= reviewDueCutoffMs;
+                    const canReview = !itemReview && pendingSched != null;
                     const surf = itemReview ? reviewSentimentSurface(itemReview, isDark) : null;
                     return (
                     <View key={item.id}>
@@ -691,24 +780,38 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                             : { backgroundColor: colors.surfaceMuted },
                         ]}
                       >
-                      <Pressable
-                        onPress={() => handleExpensePress(item.id)}
-                        style={({ pressed }) => [{ backgroundColor: 'transparent', opacity: pressed ? 0.88 : 1 }]}
-                      >
-                        <View style={styles.modalEventTitleRow}>
+                      <View style={styles.modalEventTitleRow}>
+                        <Pressable
+                          onPress={() => handleExpensePress(item.id)}
+                          style={({ pressed }) => [
+                            styles.modalEventTitlePress,
+                            { opacity: pressed ? 0.88 : 1 },
+                          ]}
+                        >
                           <View
                             style={[
                               styles.modalDot,
-                              {
-                                backgroundColor: surf?.dot ?? categoryAccent(item.category),
-                              },
+                              { backgroundColor: categoryDotColor(item.category) },
                             ]}
                           />
                           <Text style={[styles.modalEventTitle, { color: colors.text }]} numberOfLines={2}>
                             {(item.item ?? item.content ?? item.reason ?? '소비').trim()}
                           </Text>
-                        </View>
-                      </Pressable>
+                        </Pressable>
+                        {canReview && pendingSched ? (
+                          <Pressable
+                            onPress={() => openReviewForExpense(item.id, pendingSched.id)}
+                            style={[
+                              styles.modalReviewBtn,
+                              { borderColor: colors.primary, backgroundColor: colors.choiceActiveBg },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="평가하기"
+                          >
+                            <Text style={[styles.modalReviewBtnText, { color: colors.primary }]}>평가하기</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
 
                       <View style={[styles.modalField, { borderBottomColor: colors.border }]}>
                         <Text style={[styles.modalFieldLabel, { color: colors.textMuted }]}>날짜 및 시간</Text>
@@ -736,14 +839,6 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                       ) : null}
 
                       <View style={styles.modalActions}>
-                        {canStartReview ? (
-                          <Pressable
-                            onPress={() => openReviewForExpense(item.id, pendingSched.id)}
-                            style={[styles.modalGhostBtn, { borderColor: colors.primary, backgroundColor: colors.choiceActiveBg }]}
-                          >
-                            <Text style={[styles.modalGhostBtnText, { color: colors.primary }]}>평가하기</Text>
-                          </Pressable>
-                        ) : null}
                         <Pressable
                           onPress={() => handleExpensePress(item.id)}
                           style={[styles.modalGhostBtn, { borderColor: colors.border }]}
@@ -766,14 +861,14 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                       </View>
                     </View>
                     );
-                  });
-                  })()}
+                  })}
                 </ScrollView>
               )}
             </View>
           </View>
         </View>
       </Modal>
+      ) : null}
     </View>
   );
 }
@@ -860,19 +955,6 @@ function expenseCategoryLine(category: ExpenseCategory): string {
     case 'food':
     default:
       return '외식(포장)';
-  }
-}
-
-function categoryAccent(category: ExpenseCategory): string {
-  switch (category) {
-    case 'delivery':
-      return '#22c55e';
-    case 'cafe':
-      return '#ca8a04';
-    case 'takeout':
-    case 'food':
-    default:
-      return '#ea580c';
   }
 }
 
@@ -1131,11 +1213,45 @@ const styles = StyleSheet.create({
   breakdownTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.3 },
   breakdownSubtitle: { marginTop: 3, fontSize: 12, fontWeight: '600' },
   breakdownToggleText: { fontSize: 12, fontWeight: '800' },
-  breakdownCollapsedSummary: {
+  breakdownCollapsedBlock: {
     marginTop: 10,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 18,
+    gap: 8,
+  },
+  breakdownCollapsedTotalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  breakdownCollapsedTotalLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  breakdownCollapsedTotalAmount: {
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+    flexShrink: 0,
+    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
+  },
+  breakdownCollapsedCatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  breakdownCollapsedCatCell: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  breakdownCollapsedCatText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   daysPill: {
     flexDirection: 'row',
@@ -1228,6 +1344,12 @@ const styles = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11,
     alignItems: 'center', justifyContent: 'center',
   },
+  breakdownBudgetHint: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
   monthStateWrap: {
     minHeight: 80,
     justifyContent: 'center',
@@ -1309,9 +1431,16 @@ const styles = StyleSheet.create({
   },
   modalEventTitleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 10,
     marginBottom: 10,
+  },
+  modalEventTitlePress: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    minWidth: 0,
   },
   modalDot: {
     width: 10,
@@ -1324,6 +1453,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     lineHeight: 22,
+  },
+  modalReviewBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    flexShrink: 0,
+  },
+  modalReviewBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   modalField: {
     paddingVertical: 10,

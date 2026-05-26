@@ -21,7 +21,7 @@ export type ManualExpenseFormInput = {
  */
 export function buildManualExpensePayload(input: ManualExpenseFormInput): Omit<
   Expense,
-  'id' | 'accountId' | 'createdAt' | 'updatedAt'
+  'id' | 'accountId' | 'userId' | 'createdAt' | 'updatedAt'
 > {
   const item = input.item.trim();
   return {

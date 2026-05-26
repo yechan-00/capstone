@@ -98,53 +98,92 @@ service cloud.firestore {
     // 최상위 Expenses 컬렉션 (현재 앱 구조에 맞춤)
     match /expenses/{expenseId} {
       allow read: if request.auth != null &&
-        resource.data.accountId == 'account_' + request.auth.uid;
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
 
       allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
         request.resource.data.accountId == 'account_' + request.auth.uid;
 
       allow update: if request.auth != null &&
         resource.data.accountId == 'account_' + request.auth.uid &&
-        request.resource.data.accountId == resource.data.accountId;
+        request.resource.data.accountId == resource.data.accountId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        ) &&
+        (
+          !('userId' in request.resource.data) ||
+          request.resource.data.userId == request.auth.uid
+        );
 
       allow delete: if request.auth != null &&
-        resource.data.accountId == 'account_' + request.auth.uid;
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
     }
 
     // 최상위 Reviews 컬렉션
     match /reviews/{reviewId} {
       allow read: if request.auth != null &&
         (
+          resource.data.userId == request.auth.uid ||
           resource.data.accountId == 'account_' + request.auth.uid ||
           resource.data.reviewerUserId == request.auth.uid
         );
 
       allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
         request.resource.data.accountId == 'account_' + request.auth.uid &&
         request.resource.data.reviewerUserId == request.auth.uid;
 
       allow update: if request.auth != null &&
         resource.data.accountId == 'account_' + request.auth.uid &&
-        request.resource.data.reviewerUserId == resource.data.reviewerUserId;
+        request.resource.data.reviewerUserId == resource.data.reviewerUserId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        );
 
       allow delete: if request.auth != null &&
-        resource.data.accountId == 'account_' + request.auth.uid;
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
     }
 
     // 최상위 Review Schedules 컬렉션
     match /review_schedules/{scheduleId} {
       allow read: if request.auth != null &&
-        resource.data.accountId == 'account_' + request.auth.uid;
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
 
       allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
         request.resource.data.accountId == 'account_' + request.auth.uid;
 
       allow update: if request.auth != null &&
         resource.data.accountId == 'account_' + request.auth.uid &&
-        request.resource.data.accountId == resource.data.accountId;
+        request.resource.data.accountId == resource.data.accountId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        ) &&
+        (
+          !('userId' in request.resource.data) ||
+          request.resource.data.userId == request.auth.uid
+        );
 
       allow delete: if request.auth != null &&
-        resource.data.accountId == 'account_' + request.auth.uid;
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
     }
   }
 }

@@ -39,6 +39,14 @@ const cardShadow = (isDark: boolean) =>
     default: {},
   });
 
+function regretChipFlex(label: string): number {
+  const len = label.replace(/\s/g, '').length;
+  if (len <= 1) return 0.68;
+  if (len <= 2) return 0.82;
+  if (len <= 3) return 0.95;
+  return 1.15;
+}
+
 export default function ReviewScreen() {
   const router = useRouter();
   const { user, account } = useAuth();
@@ -51,7 +59,7 @@ export default function ReviewScreen() {
   const expenseId = firstParam(rawParams.expenseId);
   const scheduleId = firstParam(rawParams.scheduleId);
 
-  const { primary: primaryRegretReasons, rest: restRegretReasons } = useMemo(() => regretReasonsForReviewUi(), []);
+  const { primary: primaryRegretReasons } = useMemo(() => regretReasonsForReviewUi(), []);
 
   const [rating, setRating] = useState<number>(0);
   const [reasons, setReasons] = useState<RegretReason[]>([]);
@@ -59,7 +67,6 @@ export default function ReviewScreen() {
   const [memo, setMemo] = useState('');
   const [saving, setSaving] = useState(false);
   const [skipping, setSkipping] = useState(false);
-  const [showAllRestReasons, setShowAllRestReasons] = useState(false);
 
   const canSubmit = rating >= 1;
   const showReasons = useMemo(() => needsRegretReasonsFlow(rating), [rating]);
@@ -105,6 +112,7 @@ export default function ReviewScreen() {
         expenseId,
         scheduleId,
         accountId: account.id,
+        userId: user.uid,
         reviewerUserId: user.uid,
         reviewType: 'self',
         decisionAgain: decisionAgainFromSatisfaction(rating),
@@ -234,7 +242,7 @@ export default function ReviewScreen() {
             cardShadow(isDark),
           ]}
         >
-          <View style={[styles.sheetAccentMuted, { backgroundColor: colors.textMuted }]} />
+          <View style={[styles.sheetAccent, { backgroundColor: colors.accentCta }]} />
           <View style={styles.sheetInner}>
             <Text style={[styles.kicker, { color: colors.textMuted }]}>메모 · 이유</Text>
             <Text style={[styles.blockTitle, { color: colors.text }]}>
@@ -242,55 +250,29 @@ export default function ReviewScreen() {
             </Text>
             <Text style={[styles.blockDesc, { color: colors.textSec }]}>
               {showReasons
-                ? '자주 고르는 이유만 보여요. 더 필요하면 펼칠 수 있어요.'
+                ? '자주 고르는 이유만 보여요.'
                 : '선택이에요. 적지 않아도 괜찮아요.'}
             </Text>
 
             {showReasons && (
               <>
                 <View style={{ height: 14 }} />
-                <View style={styles.chipWrap}>
+                <View style={styles.equalChipRow}>
                   {primaryRegretReasons.map((r) => (
                     <Chip
                       key={r.key}
                       label={r.label}
                       active={reasons.includes(r.key)}
                       onPress={() => onToggleReason(r.key)}
+                      compact
+                      soft
+                      style={[
+                        styles.softChipCell,
+                        { flex: regretChipFlex(r.label), minWidth: 0 },
+                      ]}
                     />
                   ))}
                 </View>
-                {restRegretReasons.length > 0 ? (
-                  <>
-                    <Pressable
-                      onPress={() => setShowAllRestReasons((v) => !v)}
-                      style={({ pressed }) => [
-                        styles.moreRow,
-                        { borderColor: colors.border, opacity: pressed ? 0.85 : 1 },
-                      ]}
-                    >
-                      <Text style={[styles.moreRowText, { color: colors.primary }]}>
-                        {showAllRestReasons ? '접기' : `다른 이유 ${restRegretReasons.length}개`}
-                      </Text>
-                      <MaterialIcons
-                        name={showAllRestReasons ? 'expand-less' : 'expand-more'}
-                        size={22}
-                        color={colors.primary}
-                      />
-                    </Pressable>
-                    {showAllRestReasons ? (
-                      <View style={[styles.chipWrap, { marginTop: 4 }]}>
-                        {restRegretReasons.map((r) => (
-                          <Chip
-                            key={r.key}
-                            label={r.label}
-                            active={reasons.includes(r.key)}
-                            onPress={() => onToggleReason(r.key)}
-                          />
-                        ))}
-                      </View>
-                    ) : null}
-                  </>
-                ) : null}
                 {reasons.includes('other') && (
                   <TextInput
                     value={otherReason}
@@ -317,7 +299,7 @@ export default function ReviewScreen() {
             <TextInput
               value={memo}
               onChangeText={setMemo}
-              placeholder="예: 배고파서 시켰는데 생각보다 비쌌다"
+              placeholder="예: 가격대비 양이 적음"
               placeholderTextColor={colors.placeholder}
               style={[
                 styles.memo,
@@ -392,25 +374,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetAccent: { width: 5 },
-  sheetAccentMuted: { width: 5, opacity: 0.85 },
   sheetInner: { flex: 1, padding: 18 },
   kicker: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
   blockTitle: { marginTop: 6, fontSize: 18, fontWeight: '900' },
   blockDesc: { marginTop: 8, fontSize: 14, fontWeight: '600', lineHeight: 21 },
 
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-
-  moreRow: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  moreRowText: { fontSize: 13, fontWeight: '800' },
+  equalChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: 5 },
+  softChipCell: { borderRadius: 12, paddingHorizontal: 2 },
 
   textIn: {
     borderRadius: 12,

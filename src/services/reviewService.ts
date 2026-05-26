@@ -12,8 +12,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Review } from '@/lib/types';
-import { timestampToDate } from '@/utils/firestore';
-import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
+import { resolveUserId } from '@/lib/accountId';
+import { mapReviewDoc } from '@/utils/firestore';
 import { cancelReminder } from '@/services/notificationService';
 import { scheduleService } from '@/services/scheduleService';
 
@@ -24,7 +24,7 @@ const SCHEDULES_COLLECTION = 'review_schedules';
 const EXPENSE_ID_IN_CHUNK = 10;
 
 export const reviewService = {
-  async create(review: Omit<Review, 'id' | 'createdAt'>): Promise<string> {
+  async create(review: Omit<Review, 'id' | 'createdAt' | 'userId'> & { userId?: string }): Promise<string> {
     try {
       let notificationId: string | undefined;
 
@@ -37,14 +37,22 @@ export const reviewService = {
           throw new Error('리뷰 스케줄을 찾을 수 없습니다.');
         }
         const scheduleData = scheduleSnap.data();
+        if (scheduleData.status === 'done') {
+          throw new Error('이미 완료된 리뷰입니다.');
+        }
+        if (scheduleData.status === 'skipped') {
+          throw new Error('건너뛴 리뷰입니다.');
+        }
         notificationId =
           typeof scheduleData?.notificationId === 'string'
             ? scheduleData.notificationId
             : undefined;
 
         const reviewRef = doc(collection(db, COLLECTION_NAME));
+        const userId = resolveUserId({ accountId: review.accountId, userId: review.userId ?? review.reviewerUserId });
         const reviewData: Record<string, unknown> = {
           ...review,
+          userId,
           id: reviewRef.id,
           reviewedAt: Timestamp.fromDate(review.reviewedAt),
           createdAt: serverTimestamp(),
@@ -82,6 +90,14 @@ export const reviewService = {
       return reviewId;
     } catch (error) {
       console.error('Failed to create review:', error);
+      if (error instanceof Error) {
+        const known = [
+          '리뷰 스케줄을 찾을 수 없습니다.',
+          '이미 완료된 리뷰입니다.',
+          '건너뛴 리뷰입니다.',
+        ];
+        if (known.includes(error.message)) throw error;
+      }
       throw new Error('리뷰를 생성하는데 실패했습니다.');
     }
   },
@@ -96,16 +112,7 @@ export const reviewService = {
       );
 
       const snapshot = await getDocs(q);
-      return snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          reviewedAt: timestampToDate(data.reviewedAt),
-          createdAt: timestampToDate(data.createdAt),
-          satisfaction: normalizeReviewSatisfaction(data.satisfaction),
-        } as Review;
-      });
+      return snapshot.docs.map((docSnap) => mapReviewDoc<Review>(docSnap));
     } catch (error) {
       console.error('Failed to get reviews:', error);
       throw new Error('리뷰를 조회하는데 실패했습니다.');
@@ -134,14 +141,7 @@ export const reviewService = {
         );
         const snapshot = await getDocs(q);
         for (const docSnap of snapshot.docs) {
-          const data = docSnap.data();
-          const review = {
-            id: docSnap.id,
-            ...data,
-            reviewedAt: timestampToDate(data.reviewedAt),
-            createdAt: timestampToDate(data.createdAt),
-            satisfaction: normalizeReviewSatisfaction(data.satisfaction),
-          } as Review;
+          const review = mapReviewDoc<Review>(docSnap);
           const eid = review.expenseId;
           const prev = result.get(eid);
           if (!prev || review.reviewedAt.getTime() > prev.reviewedAt.getTime()) {
@@ -165,21 +165,55 @@ export const reviewService = {
       );
 
       const snapshot = await getDocs(q);
-      const reviews = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          reviewedAt: timestampToDate(data.reviewedAt),
-          createdAt: timestampToDate(data.createdAt),
-          satisfaction: normalizeReviewSatisfaction(data.satisfaction),
-        } as Review;
-      });
+      const reviews = snapshot.docs.map((docSnap) => mapReviewDoc<Review>(docSnap));
 
       return limit ? reviews.slice(0, limit) : reviews;
     } catch (error) {
       console.error('Failed to get reviews:', error);
       throw new Error('리뷰 목록을 조회하는데 실패했습니다.');
+    }
+  },
+
+  async getByAccountIdInMonth(accountId: string, year: number, month: number): Promise<Review[]> {
+    try {
+      const start = new Date(year, month, 1, 0, 0, 0, 0);
+      const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('accountId', '==', accountId),
+        where('reviewedAt', '>=', Timestamp.fromDate(start)),
+        where('reviewedAt', '<=', Timestamp.fromDate(end)),
+        orderBy('reviewedAt', 'desc'),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((docSnap) => mapReviewDoc<Review>(docSnap));
+    } catch (error) {
+      console.error('Failed to get reviews in month:', error);
+      throw new Error('월별 리뷰를 조회하는데 실패했습니다.');
+    }
+  },
+
+  /** 좋아요 목록 등 scheduleId로 완료 리뷰 조회 (Firestore `in` 최대 10개씩) */
+  async getByScheduleIds(accountId: string, scheduleIds: string[]): Promise<Review[]> {
+    const unique = [...new Set(scheduleIds.filter((id) => typeof id === 'string' && id.length > 0))];
+    if (unique.length === 0) return [];
+
+    try {
+      const results: Review[] = [];
+      for (let i = 0; i < unique.length; i += EXPENSE_ID_IN_CHUNK) {
+        const chunk = unique.slice(i, i + EXPENSE_ID_IN_CHUNK);
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('scheduleId', 'in', chunk),
+        );
+        const snapshot = await getDocs(q);
+        results.push(...snapshot.docs.map((docSnap) => mapReviewDoc<Review>(docSnap)));
+      }
+      return results;
+    } catch (error) {
+      console.error('Failed to get reviews by schedule ids:', error);
+      throw new Error('리뷰를 조회하는데 실패했습니다.');
     }
   },
 };

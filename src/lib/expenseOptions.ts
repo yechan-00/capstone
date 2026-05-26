@@ -1,3 +1,5 @@
+import { EXPENSE_MOOD_OPTIONS } from './expenseMood';
+
 export type CategoryKey = 'takeout' | 'cafe' | 'delivery';
 
 export const CATEGORIES: { key: CategoryKey; label: string; emoji: string }[] = [
@@ -34,12 +36,10 @@ export const REASON_GROUPS = [{ title: '빠른 선택', items: ADD_EXPENSE_QUICK
 export type Reason = (typeof ADD_EXPENSE_QUICK_REASONS)[number];
 export const REASONS: readonly Reason[] = ADD_EXPENSE_QUICK_REASONS;
 
-export const MOODS = [
-  { key: 'very good', label: '아주 좋음', emoji: '😊' },
-  { key: 'good', label: '좋음', emoji: '🙂' },
-  { key: 'normal', label: '보통', emoji: '😑' },
-  { key: 'bad', label: '안좋음', emoji: '😕' },
-  { key: 'too bad', label: '매우 안좋음', emoji: '😠' },
-] as const;
+export const MOODS = EXPENSE_MOOD_OPTIONS.map((m) => ({
+  key: m.key,
+  label: m.label,
+  emoji: m.emoji,
+}));
 
 export const QUICK_AMOUNTS = [1000, 5000, 10000, 20000, 50000];

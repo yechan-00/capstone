@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Expense } from '@/lib/types';
-import { EXPENSE_CATEGORIES, EXPENSE_MOODS } from '@/lib/constants';
+import { EXPENSE_CATEGORIES } from '@/lib/constants';
+import { expenseMoodLabel } from '@/lib/expenseMood';
 import { formatDate } from '@/utils/time';
 import { useTheme } from '@/theme/ThemeContext';
 
@@ -13,7 +14,7 @@ interface ExpenseCardProps {
 export const ExpenseCard: React.FC<ExpenseCardProps> = ({ expense, onPress, onDelete }) => {
   const { colors } = useTheme();
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.value === expense.category)?.label || expense.category;
-  const moodLabel = EXPENSE_MOODS.find((m) => m.value === expense.mood)?.label || expense.mood;
+  const moodLabel = expenseMoodLabel(expense.mood, { withEmoji: true });
   const itemLine = (expense.item ?? expense.content ?? '').trim();
   const summary = [expense.summaryEmoji, expense.summaryLine].filter(Boolean).join(' ').trim();
 

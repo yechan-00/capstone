@@ -11,7 +11,9 @@ import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Account } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays } from '@/lib/accountSettings';
+import { toAccountId } from '@/lib/accountId';
 import * as authService from '@/services/authService';
+import { backfillUserIdForAccount } from '@/services/userDataMigration';
 
 interface AuthContextType {
   user: User | null;
@@ -26,6 +28,11 @@ interface AuthContextType {
     amount: number,
     currency: 'KRW' | 'USD',
     exchangeRateUsdToKrw: number
+  ) => Promise<void>;
+  updateFoodBudget: (amount: number, currency: 'KRW' | 'USD') => Promise<void>;
+  updateBudgetPeriodSettings: (
+    mode: 'calendar' | 'payday',
+    paydayDayOfMonth: number,
   ) => Promise<void>;
   changeEmail: (newEmail: string, currentPassword: string) => Promise<void>;
   changePassword: (newPassword: string, currentPassword: string) => Promise<void>;
@@ -51,7 +58,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setAccount(userAccount);
           } else {
             setAccount({
-              id: `account_${user.uid}`,
+              id: toAccountId(user.uid),
               userId: user.uid,
               name: '내 가계부',
               nickname: '',
@@ -74,7 +81,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (user) {
           // 오프라인 등으로 계정 조회 실패 시 최소 정보로 진입 허용
           setAccount({
-            id: `account_${user.uid}`,
+            id: toAccountId(user.uid),
             userId: user.uid,
             name: '내 가계부',
             nickname: '',
@@ -102,6 +109,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return unsubscribe;
   }, []);
+
+  /** 레거시 문서에 userId 필드 보충 (유저당 1회, 백그라운드) */
+  useEffect(() => {
+    if (!account?.id || !user?.uid) return;
+    void backfillUserIdForAccount(account.id).catch((err) => {
+      console.warn('[migration] userId backfill skipped', err);
+    });
+  }, [account?.id, user?.uid]);
 
   const signUp = useCallback(async (email: string, password: string) => {
     await authService.signUp(email, password);
@@ -133,7 +148,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     async (enabled: boolean, reviewReminderTime: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      const accountId = `account_${uid}`;
+      const accountId = toAccountId(uid);
       await authService.updateReviewReminderSettings(accountId, enabled, reviewReminderTime);
       setAccount((prev) =>
         prev
@@ -153,7 +168,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     async (amount: number, currency: 'KRW' | 'USD', exchangeRateUsdToKrw: number) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      const accountId = `account_${uid}`;
+      const accountId = toAccountId(uid);
       await authService.updateMonthlyIncome(accountId, amount, currency, exchangeRateUsdToKrw);
       setAccount((prev) =>
         prev
@@ -169,10 +184,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
+  const updateFoodBudget = useCallback(async (amount: number, currency: 'KRW' | 'USD') => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const accountId = toAccountId(uid);
+    await authService.updateFoodBudget(accountId, amount, currency);
+    setAccount((prev) =>
+      prev ? { ...prev, foodBudgetAmount: amount, foodBudgetCurrency: currency } : null
+    );
+  }, []);
+
+  const updateBudgetPeriodSettings = useCallback(
+    async (mode: 'calendar' | 'payday', paydayDayOfMonth: number) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      const accountId = toAccountId(uid);
+      await authService.updateBudgetPeriodSettings(accountId, mode, paydayDayOfMonth);
+      setAccount((prev) =>
+        prev
+          ? { ...prev, budgetPeriodMode: mode, paydayDayOfMonth: paydayDayOfMonth }
+          : null
+      );
+    },
+    []
+  );
+
   const updateReviewDelayDays = useCallback(async (reviewDelayDays: (1 | 3 | 7 | 30)[]) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const accountId = `account_${uid}`;
+    const accountId = toAccountId(uid);
     await authService.updateReviewDelayDays(accountId, reviewDelayDays);
     setAccount((prev) => (prev ? { ...prev, reviewDelayDays: resolveReviewDelayDays({ ...(prev as any), reviewDelayDays }) } : null));
   }, []);
@@ -189,7 +229,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const updateNickname = useCallback(async (nickname: string) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const accountId = `account_${uid}`;
+    const accountId = toAccountId(uid);
     const saved = await authService.updateNickname(accountId, nickname);
     setAccount((prev) => (prev ? { ...prev, nickname: saved } : null));
   }, []);
@@ -205,6 +245,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       updateReviewReminderSettings,
       updateReviewDelayDays,
       updateMonthlyIncome,
+      updateFoodBudget,
+      updateBudgetPeriodSettings,
       changeEmail,
       changePassword,
       updateNickname,
@@ -221,6 +263,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       updateReviewReminderSettings,
       updateReviewDelayDays,
       updateMonthlyIncome,
+      updateFoodBudget,
+      updateBudgetPeriodSettings,
       changeEmail,
       changePassword,
       updateNickname,

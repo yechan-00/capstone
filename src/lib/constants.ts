@@ -1,4 +1,5 @@
 import { ExpenseCategory } from './types';
+import { EXPENSE_MOOD_OPTIONS } from './expenseMood';
 
 export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
   { value: 'takeout', label: '외식(포장)' },
@@ -6,16 +7,10 @@ export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
   { value: 'delivery', label: '배달' },
 ];
 
-export const EXPENSE_MOODS: { value: string; label: string }[] = [
-  { value: 'good', label: '😊 좋음' },
-  { value: 'normal', label: '🙂 보통' },
-  { value: 'bad', label: '😕 안좋음' },
-  { value: 'happy', label: '😊 기쁨' },
-  { value: 'neutral', label: '😐 보통' },
-  { value: 'stressed', label: '😰 스트레스' },
-  { value: 'excited', label: '🤩 신남' },
-  { value: 'tired', label: '😴 피곤' },
-];
+export const EXPENSE_MOODS = EXPENSE_MOOD_OPTIONS.map((m) => ({
+  value: m.key,
+  label: `${m.emoji} ${m.label}`,
+}));
 
 export { REGRET_REASONS } from './regretReasons';
 

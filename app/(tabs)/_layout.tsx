@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
+  Platform,
   View,
   ActivityIndicator,
 } from 'react-native';
@@ -34,7 +35,9 @@ function AddTabButton({
       style={styles.addTabButton}
       onPress={onPress}
       onLongPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        if (Platform.OS !== 'web') {
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
         onLongPress();
       }}
       delayLongPress={400}
@@ -91,6 +94,8 @@ function QuickInputSheet({
       setMood(null);
       setTagsText('');
       setCustomReason('');
+      setInnerShowPresetModal(false);
+      setInnerEditingPreset(null);
     }
   }, [visible]);
 
@@ -125,11 +130,12 @@ function QuickInputSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={() => { setQuickEditMode(null); onClose(); }} />
-      <View style={[
-        styles.sheet,
-        { backgroundColor: colors.surface, paddingBottom: insets.bottom + 16 },
-      ]}>
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => { setQuickEditMode(null); onClose(); }} />
+        <View style={[
+          styles.sheet,
+          { backgroundColor: colors.surface, paddingBottom: insets.bottom + 16 },
+        ]}>
         {/* 핸들 */}
         <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
 
@@ -373,6 +379,7 @@ function QuickInputSheet({
             )}
           </>
         )}
+        </View>
       <QuickPresetModal
         visible={innerShowPresetModal}
         preset={innerEditingPreset}
@@ -518,9 +525,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22, shadowRadius: 10, elevation: 8,
   },
   addTabLabel: { marginTop: 2, fontSize: 11, fontWeight: '700' },
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
   sheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16, paddingTop: 12, gap: 6,

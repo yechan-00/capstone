@@ -21,6 +21,13 @@ export interface Account {
   monthlyIncomeAmount?: number;
   monthlyIncomeCurrency?: 'KRW' | 'USD';
   exchangeRateUsdToKrw?: number;
+  /** 식비(외식·배달·카페) 월 예산. 월 수입과 별도 설정 가능 */
+  foodBudgetAmount?: number;
+  foodBudgetCurrency?: 'KRW' | 'USD';
+  /** 통계·예산 주기: calendar=달력 월, payday=월급날 기준 */
+  budgetPeriodMode?: 'calendar' | 'payday';
+  /** 매월 월급날(1~31). budgetPeriodMode=payday 일 때 사용 */
+  paydayDayOfMonth?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,9 +49,12 @@ export type ExpenseCategory =
   | 'food';
 
 export type ExpenseMood =
+  | 'very good'
   | 'good'
   | 'normal'
   | 'bad'
+  | 'too bad'
+  /** @deprecated 레거시. normalizeExpenseMood로 정규화 */
   | 'happy'
   | 'neutral'
   | 'stressed'
@@ -56,6 +66,7 @@ export type ExpenseSourceType = 'manual' | 'card' | 'bank';
 export interface Expense {
   id: string;
   accountId: string;
+  userId: string;
   amount: number;
   /** 무엇을 샀는지 (표시·검색 우선) */
   item?: string;
@@ -102,6 +113,7 @@ export interface Review {
   expenseId: string;
   scheduleId: string;
   accountId: string;
+  userId: string;
   reviewerUserId: string;
   reviewType: ReviewType;
   decisionAgain: DecisionAgain;
@@ -114,21 +126,25 @@ export interface Review {
 }
 
 // Review Schedule Types
-export type ScheduleStatus = 'pending' | 'done' | 'skipped';
+export type ScheduleStatus = 'pending' | 'done' | 'skipped' | 'expired';
 
-/** 신규 소비는 d3만 생성. 레거시 immediate·d1·d7·d30 문서는 조회·표시 호환용 */
+/** 신규: d1=다음날 0시 오픈. 레거시 immediate·d3·d7·d30 호환 */
 export type ScheduleType = 'immediate' | 'd1' | 'd7' | 'd3' | 'd30';
 
 export interface ReviewSchedule {
   id: string;
   expenseId: string;
   accountId: string;
+  userId: string;
   type: ScheduleType;
-  dueAt: Date; // 리뷰 예정일
-  /** d3=3, immediate=0, d1=1, d7=7, 레거시 d30 */
+  /** 앱에서 평가 가능해지는 시각 (소비 다음날 00:00) */
+  dueAt: Date;
+  /** dueAt + 47시간 59분 */
+  expiresAt?: Date;
+  /** d1=1 (신규 고정). 레거시 3·7·30 */
   delayDays: number;
   status: ScheduleStatus;
-  notificationId?: string; // expo-notifications ID
+  notificationId?: string;
   createdAt: Date;
   completedAt?: Date;
 }
@@ -170,6 +186,19 @@ export interface IncomeInsight {
   isOverBudget: boolean;
 }
 
+/** 설정된 식비 예산 대비 기간 소비 요약 */
+export interface FoodBudgetInsight {
+  budgetKrw: number;
+  totalSpendKrw: number;
+  spendRatioPercent: number;
+  remainingKrw: number;
+  isOverBudget: boolean;
+  periodLabel: string;
+  periodMode: 'calendar' | 'payday';
+  /** 전체 사용자 비교 (추후 집계). 현재 null */
+  savingsPercentile: number | null;
+}
+
 export interface Insights {
   period: {
     start: Date;
@@ -181,11 +210,15 @@ export interface Insights {
   timeOfDayInsights: TimeOfDayInsight[];
   /** spentAt 기준 요일별 소비 건수. 인덱스 0=일 … 6=토 (Date.getDay) */
   weekdayExpenseCounts: number[];
+  /** spentAt 기준 요일별 카테고리 건수 (delivery/cafe/takeout). 인덱스 0=일 … 6=토 */
+  weekdayCategoryCounts: Array<Record<string, number>>;
   totalExpenses: number;
   totalSpendKrw: number;
   totalRegrets: number;
   overallRegretRate: number;
   /** 월 수입 미설정 시 null */
   incomeInsight: IncomeInsight | null;
+  /** 식비 예산 미설정 시 null */
+  foodBudgetInsight: FoodBudgetInsight | null;
   patterns: string[];
 }

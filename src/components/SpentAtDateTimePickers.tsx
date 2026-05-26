@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 function mergeDateKeepTime(base: Date, from: Date): Date {
@@ -14,38 +14,60 @@ function mergeTimeKeepDate(base: Date, from: Date): Date {
   return n;
 }
 
+export type SpentAtPickerPhase = 'date' | 'time';
+
 type Props = {
+  phase: SpentAtPickerPhase;
   value: Date;
   onChange: (next: Date) => void;
+  onDateSelected?: () => void;
   textColor: string;
   themeVariant: 'light' | 'dark';
 };
 
 /**
- * iOS/Android: 날짜·시간 스피너 분리 + `ko_KR` 로케일로 년·월·일 순 인지에 맞춤.
+ * 1단계: 달력(날짜) → 2단계: 시간. iOS는 inline 달력, Android는 calendar.
  */
-export function SpentAtDateTimePickers({ value, onChange, textColor, themeVariant }: Props) {
+export function SpentAtDateTimePickers({
+  phase,
+  value,
+  onChange,
+  onDateSelected,
+  textColor,
+  themeVariant,
+}: Props) {
   const locale = Platform.OS === 'ios' ? 'ko_KR' : undefined;
+
+  if (phase === 'date') {
+    return (
+      <View style={styles.wrap}>
+        <DateTimePicker
+          value={value}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
+          locale={locale}
+          themeVariant={themeVariant}
+          textColor={textColor}
+          onChange={(_, d) => {
+            if (!d) return;
+            const dateChanged =
+              d.getFullYear() !== value.getFullYear() ||
+              d.getMonth() !== value.getMonth() ||
+              d.getDate() !== value.getDate();
+            onChange(mergeDateKeepTime(value, d));
+            if (dateChanged) onDateSelected?.();
+          }}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.label, { color: textColor }]}>날짜 (년 → 월 → 일)</Text>
-      <DateTimePicker
-        value={value}
-        mode="date"
-        display="spinner"
-        locale={locale}
-        themeVariant={themeVariant}
-        textColor={textColor}
-        onChange={(_, d) => {
-          if (d) onChange(mergeDateKeepTime(value, d));
-        }}
-      />
-      <Text style={[styles.label, styles.labelTime, { color: textColor }]}>시간 (24시간)</Text>
       <DateTimePicker
         value={value}
         mode="time"
-        display="spinner"
+        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
         is24Hour
         locale={locale}
         themeVariant={themeVariant}
@@ -59,7 +81,5 @@ export function SpentAtDateTimePickers({ value, onChange, textColor, themeVarian
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: '100%' },
-  label: { fontSize: 12, fontWeight: '800', marginBottom: 4, opacity: 0.85 },
-  labelTime: { marginTop: 8 },
+  wrap: { width: '100%', alignItems: 'center' },
 });

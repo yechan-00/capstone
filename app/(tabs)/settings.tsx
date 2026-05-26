@@ -60,7 +60,7 @@ function parseReminderTimeToDate(time: string): Date {
 export default function SettingsScreen() {
   const router = useRouter();
   const isFocusedRef = useRef(false);
-  const { user, account, logout, updateReviewReminderSettings, updateReviewDelayDays, updateMonthlyIncome, isGuest } = useAuth();
+  const { user, account, logout, updateReviewReminderSettings, updateReviewDelayDays, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
   const { colors, isDark, setDarkMode, accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
@@ -85,9 +85,23 @@ export default function SettingsScreen() {
   const [exchangeRate, setExchangeRate] = useState(
     String(account?.exchangeRateUsdToKrw ?? 1470.05)
   );
+  const [foodBudgetAmount, setFoodBudgetAmount] = useState(
+    account?.foodBudgetAmount?.toString() || '0'
+  );
+  const [foodBudgetCurrency, setFoodBudgetCurrency] = useState<'KRW' | 'USD'>(
+    account?.foodBudgetCurrency || 'KRW'
+  );
+  const [foodBudgetUnit, setFoodBudgetUnit] = useState<IncomeUnit>('base');
+  const [budgetPeriodMode, setBudgetPeriodMode] = useState<'calendar' | 'payday'>(
+    account?.budgetPeriodMode === 'payday' ? 'payday' : 'calendar'
+  );
+  const [paydayDay, setPaydayDay] = useState(String(account?.paydayDayOfMonth ?? 25));
   const incomeInitRef = useRef(false);
+  const foodBudgetInitRef = useRef(false);
+  const budgetPeriodInitRef = useRef(false);
   const reminderInitRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
+  const paydayInputRef = useRef<TextInput>(null);
 
   const scrollToTop = () => {
     scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -124,7 +138,13 @@ export default function SettingsScreen() {
     setIncomeAmount(formatNumber(raw, account.monthlyIncomeCurrency === 'USD'));
     setIncomeCurrency(account.monthlyIncomeCurrency || 'KRW');
     setExchangeRate(String(account.exchangeRateUsdToKrw ?? 1470.05));
-  }, [account?.monthlyIncomeAmount, account?.monthlyIncomeCurrency, account?.exchangeRateUsdToKrw]);
+    const foodRaw =
+      typeof account.foodBudgetAmount === 'number' ? account.foodBudgetAmount.toString() : '0';
+    setFoodBudgetAmount(formatNumber(foodRaw, account.foodBudgetCurrency === 'USD'));
+    setFoodBudgetCurrency(account.foodBudgetCurrency || 'KRW');
+    setBudgetPeriodMode(account.budgetPeriodMode === 'payday' ? 'payday' : 'calendar');
+    setPaydayDay(String(account.paydayDayOfMonth ?? 25));
+  }, [account?.monthlyIncomeAmount, account?.monthlyIncomeCurrency, account?.exchangeRateUsdToKrw, account?.foodBudgetAmount, account?.foodBudgetCurrency, account?.budgetPeriodMode, account?.paydayDayOfMonth]);
 
   const formatNumber = (value: string, allowDecimal: boolean) => {
     const cleaned = value.replace(/,/g, '');
@@ -222,6 +242,63 @@ export default function SettingsScreen() {
     }
   };
 
+  const parseFoodBudgetAmount = () => {
+    const raw = foodBudgetAmount.replace(/,/g, '').trim();
+    const parsed = foodBudgetCurrency === 'USD' ? Number(raw) : Number(raw);
+    if (Number.isNaN(parsed)) return null;
+    const multiplier = foodBudgetUnit === 'man' ? 10000 : foodBudgetUnit === 'baekman' ? 1000000 : 1;
+    return Math.round(parsed * multiplier);
+  };
+
+  const handleSaveFoodBudget = async (showAlert: boolean = true) => {
+    const parsed = parseFoodBudgetAmount();
+    if (parsed === null || parsed < 0) {
+      if (showAlert) Alert.alert('식비 예산', '0 이상의 숫자를 입력해주세요.');
+      return;
+    }
+    if (account && parsed === account.foodBudgetAmount && foodBudgetCurrency === (account.foodBudgetCurrency || 'KRW')) {
+      return;
+    }
+    try {
+      setSavingIncome(true);
+      await updateFoodBudget(parsed, foodBudgetCurrency);
+      setIncomeSaved(true);
+      scrollToTop();
+      setTimeout(() => setIncomeSaved(false), 2000);
+    } catch {
+      Alert.alert('식비 예산', '저장에 실패했습니다.');
+    } finally {
+      setSavingIncome(false);
+    }
+  };
+
+  const handleSaveBudgetPeriod = async () => {
+    const day = Number(paydayDay.replace(/[^0-9]/g, ''));
+    if (budgetPeriodMode === 'payday' && (Number.isNaN(day) || day < 1 || day > 31)) {
+      Alert.alert('월급날', '1~31 사이의 날짜를 입력해주세요.');
+      return;
+    }
+    const resolvedDay = budgetPeriodMode === 'payday' ? day : Number(account?.paydayDayOfMonth ?? 25);
+    if (
+      account &&
+      account.budgetPeriodMode === budgetPeriodMode &&
+      (account.paydayDayOfMonth ?? 25) === resolvedDay
+    ) {
+      return;
+    }
+    try {
+      setSavingIncome(true);
+      await updateBudgetPeriodSettings(budgetPeriodMode, resolvedDay);
+      setIncomeSaved(true);
+      scrollToTop();
+      setTimeout(() => setIncomeSaved(false), 2000);
+    } catch {
+      Alert.alert('통계 기준', '저장에 실패했습니다.');
+    } finally {
+      setSavingIncome(false);
+    }
+  };
+
   const handleSaveMonthlyIncome = async (showAlert: boolean = true) => {
     const parsed = parseIncomeAmount();
     if (parsed === null || parsed < 0) {
@@ -274,6 +351,26 @@ export default function SettingsScreen() {
   useDebouncedEffect(() => {
     if (!isFocusedRef.current) return;
     if (!account?.id) return;
+    if (!foodBudgetInitRef.current) {
+      foodBudgetInitRef.current = true;
+      return;
+    }
+    void handleSaveFoodBudget(false);
+  }, [foodBudgetAmount, foodBudgetCurrency, foodBudgetUnit, account?.id], 800);
+
+  useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
+    if (!account?.id) return;
+    if (!budgetPeriodInitRef.current) {
+      budgetPeriodInitRef.current = true;
+      return;
+    }
+    void handleSaveBudgetPeriod();
+  }, [budgetPeriodMode, paydayDay, account?.id], 600);
+
+  useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
+    if (!account?.id) return;
     if (!reminderInitRef.current) {
       reminderInitRef.current = true;
       return;
@@ -322,6 +419,12 @@ export default function SettingsScreen() {
           fontWeight: '600',
           color: colors.textMuted,
           marginBottom: -6,
+        },
+        fieldHint: {
+          fontSize: 12,
+          fontWeight: '600',
+          lineHeight: 18,
+          marginBottom: 4,
         },
         timeField: {
           flexDirection: 'row',
@@ -406,6 +509,55 @@ export default function SettingsScreen() {
           fontSize: 14,
           fontWeight: '600',
           color: colors.textMuted,
+        },
+        incomeDivider: {
+          height: StyleSheet.hairlineWidth,
+          marginVertical: 4,
+        },
+        paydayRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        },
+        paydayLabel: {
+          fontSize: 14,
+          fontWeight: '600',
+          color: colors.textSec,
+        },
+        paydayInputShell: {
+          width: 48,
+          height: 38,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 10,
+          backgroundColor: colors.inputBg,
+          justifyContent: 'center',
+          alignItems: 'center',
+        },
+        paydayInput: {
+          width: '100%',
+          height: '100%',
+          textAlign: 'center',
+          fontSize: 16,
+          fontWeight: '800',
+          color: colors.text,
+          paddingVertical: 0,
+          paddingHorizontal: 4,
+          ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
+        },
+        paydayDaySuffix: {
+          fontSize: 14,
+          fontWeight: '700',
+          color: colors.textSec,
+        },
+        paydayHint: {
+          flex: 1,
+          minWidth: 140,
+          fontSize: 13,
+          fontWeight: '600',
+          color: colors.textMuted,
+          lineHeight: 18,
         },
         accentHeader: {
           flexDirection: 'row', alignItems: 'center',
@@ -576,14 +728,20 @@ export default function SettingsScreen() {
             title="이메일"
             subtitle={user?.email || '-'}
             onPress={() => router.push('/settings/change-email')}
+          />
+          <SettingsRow
+            icon="lock-outline"
+            title="비밀번호 변경"
+            subtitle="변경하기"
+            onPress={() => router.push('/settings/change-password')}
             last
           />
         </SettingsCard>
 
-        <SettingsCard title="월 수입">
+        <SettingsCard title="수입 · 예산">
           <View style={styles.incomeBody}>
             <View style={styles.infoRowColumn}>
-              <Text style={styles.incomeLabel}>월 수입 (향후 인사이트·비율 분석에 사용)</Text>
+              <Text style={styles.incomeLabel}>월 수입 (선택 · 전체 소비율 분석용)</Text>
               <View style={styles.incomeRow}>
                 <TextInput
                   value={incomeAmount}
@@ -622,6 +780,82 @@ export default function SettingsScreen() {
                 />
               </View>
             )}
+
+            <View style={[styles.incomeDivider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.infoRowColumn}>
+              <Text style={styles.incomeLabel}>식비 예산 (외식·배달·카페 · 월 수입 없이도 설정 가능)</Text>
+              <View style={styles.incomeRow}>
+                <TextInput
+                  value={foodBudgetAmount}
+                  onChangeText={(value) =>
+                    setFoodBudgetAmount(formatNumber(value, foodBudgetCurrency === 'USD'))
+                  }
+                  placeholder="0"
+                  keyboardType={foodBudgetCurrency === 'USD' ? 'decimal-pad' : 'number-pad'}
+                  style={styles.incomeInput}
+                />
+                <View style={styles.chipRow}>
+                  <Chip label="KRW" active={foodBudgetCurrency === 'KRW'} onPress={() => setFoodBudgetCurrency('KRW')} />
+                  <Chip label="USD" active={foodBudgetCurrency === 'USD'} onPress={() => setFoodBudgetCurrency('USD')} />
+                </View>
+              </View>
+            </View>
+            {foodBudgetCurrency === 'KRW' && (
+              <View style={styles.unitRow}>
+                <Text style={styles.unitLabel}>입력 단위</Text>
+                <View style={styles.chipRow}>
+                  <Chip label="원" active={foodBudgetUnit === 'base'} onPress={() => setFoodBudgetUnit('base')} />
+                  <Chip label="만원" active={foodBudgetUnit === 'man'} onPress={() => setFoodBudgetUnit('man')} />
+                  <Chip label="백만원" active={foodBudgetUnit === 'baekman'} onPress={() => setFoodBudgetUnit('baekman')} />
+                </View>
+              </View>
+            )}
+
+            <View style={[styles.incomeDivider, { backgroundColor: colors.border }]} />
+
+            <Text style={styles.incomeLabel}>통계·예산 주기</Text>
+            <View style={styles.chipRow}>
+              <Chip
+                label="달력 월"
+                active={budgetPeriodMode === 'calendar'}
+                onPress={() => setBudgetPeriodMode('calendar')}
+              />
+              <Chip
+                label="월급날 기준"
+                active={budgetPeriodMode === 'payday'}
+                onPress={() => setBudgetPeriodMode('payday')}
+              />
+            </View>
+            {budgetPeriodMode === 'payday' ? (
+              <View style={styles.paydayRow}>
+                <Text style={styles.paydayLabel}>매월 월급날</Text>
+                <Pressable
+                  style={styles.paydayInputShell}
+                  onPress={() => paydayInputRef.current?.focus()}
+                  accessibilityRole="button"
+                  accessibilityLabel="월급날 입력"
+                >
+                  <TextInput
+                    ref={paydayInputRef}
+                    value={paydayDay}
+                    onChangeText={(v) => setPaydayDay(v.replace(/[^0-9]/g, '').slice(0, 2))}
+                    placeholder="25"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    maxLength={2}
+                    showSoftInputOnFocus
+                    selectTextOnFocus
+                    style={styles.paydayInput}
+                  />
+                </Pressable>
+                <Text style={styles.paydayDaySuffix}>일</Text>
+                <Text style={styles.paydayHint} numberOfLines={2}>
+                  · 홈 캘린더에 빨간 원으로 표시
+                </Text>
+              </View>
+            ) : null}
           </View>
         </SettingsCard>
 
@@ -642,6 +876,9 @@ export default function SettingsScreen() {
             }
           />
           <View style={[styles.cardInset, { opacity: reviewReminderEnabled ? 1 : 0.45 }]}>
+            <Text style={[styles.fieldHint, { color: colors.textMuted }]}>
+              소비 다음 날 0시부터 47시간 59분 안에 앱에서 평가할 수 있어요. 알림은 아래 시간에 보내드려요.
+            </Text>
             <Text style={styles.fieldLabel}>알림 시간</Text>
             <TouchableOpacity
               style={styles.timeField}
@@ -653,23 +890,6 @@ export default function SettingsScreen() {
               <MaterialIcons name="schedule" size={20} color={colors.textMuted} />
             </TouchableOpacity>
 
-            <Text style={styles.fieldLabel}>피드백 주기 (소비 후 며칠 뒤에 리뷰 요청)</Text>
-            <View style={styles.delayRow}>
-              {REVIEW_DELAY_OPTIONS.map((d) => {
-                const active = selectedDelayDay === d;
-                return (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.delayChip, active && styles.delayChipActive]}
-                    onPress={() => setReviewDelayDays([d])}
-                    disabled={!reviewReminderEnabled}
-                    activeOpacity={0.88}
-                  >
-                    <Text style={[styles.delayChipText, active && styles.delayChipTextActive]}>{d}일</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
           </View>
           {Platform.OS === 'android' && showTimePicker && reviewReminderEnabled && (
             <DateTimePicker
@@ -727,12 +947,6 @@ export default function SettingsScreen() {
         </SettingsCard>
 
         <SettingsCard title="보안">
-          <SettingsRow
-            icon="lock-outline"
-            title="비밀번호 변경"
-            subtitle="변경하기"
-            onPress={() => router.push('/settings/change-password')}
-          />
           <SettingsRow
             icon="shield"
             title="로그인 기기 관리"

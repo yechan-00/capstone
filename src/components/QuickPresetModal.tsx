@@ -42,8 +42,12 @@ export function QuickPresetModal({ visible, preset, onClose, onSave }: Props) {
       setCategory(preset?.category ?? 'takeout');
       setItem(preset?.item ?? '');
       setSelectedColor(preset?.color ?? DEFAULT_COLOR);
+    } else {
+      setShowColorPicker(false);
     }
   }, [visible, preset]);
+
+  if (!visible) return null;
 
   const handleSave = () => {
     if (!label.trim()) return;
@@ -62,10 +66,15 @@ export function QuickPresetModal({ visible, preset, onClose, onSave }: Props) {
 
   return (
     <>
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={onClose} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.kavWrap}>
-          <View style={[s.sheet, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+      <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+        <View style={s.modalRoot}>
+          <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={onClose} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={s.kavWrap}
+            pointerEvents="box-none"
+          >
+            <View style={[s.sheet, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
             <Text style={[s.title, { color: colors.text }]}>{preset ? '프리셋 편집' : '빠른 입력 추가'}</Text>
 
             {/* 버튼 이름 */}
@@ -167,23 +176,26 @@ export function QuickPresetModal({ visible, preset, onClose, onSave }: Props) {
                 <Text style={s.saveBtnText}>저장</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAvoidingView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
-      {/* 컬러피커 */}
-      <ColorPickerModal
-        visible={showColorPicker}
-        initialColor={selectedColor}
-        onClose={() => setShowColorPicker(false)}
-        onSelect={(hex) => setSelectedColor(hex)}
-        isDark={isDark}
-      />
+      {showColorPicker ? (
+        <ColorPickerModal
+          visible
+          initialColor={selectedColor}
+          onClose={() => setShowColorPicker(false)}
+          onSelect={(hex) => setSelectedColor(hex)}
+          isDark={isDark}
+        />
+      ) : null}
     </>
   );
 }
 
 const s = StyleSheet.create({
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   kavWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {

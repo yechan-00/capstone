@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
+import { toAccountId } from '@/lib/accountId';
 import { Account } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
 import { timestampToDate } from '@/utils/firestore';
@@ -34,7 +35,7 @@ export const signUp = async (email: string, password: string): Promise<UserCrede
     const user = userCredential.user;
 
     // 회원가입 후 자동으로 Account 생성
-    const accountId = `account_${user.uid}`;
+    const accountId = toAccountId(user.uid);
     const account: Account = {
       id: accountId,
       userId: user.uid,
@@ -93,7 +94,7 @@ export const getCurrentUser = (): User | null => {
 
 export const getUserAccount = async (userId: string): Promise<Account | null> => {
   try {
-    const accountId = `account_${userId}`;
+    const accountId = toAccountId(userId);
     const accountPromise = getDoc(doc(db, 'accounts', accountId));
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('account-timeout')), 3000)
@@ -132,6 +133,13 @@ export const getUserAccount = async (userId: string): Promise<Account | null> =>
       monthlyIncomeCurrency: data.monthlyIncomeCurrency === 'USD' ? 'USD' : 'KRW',
       exchangeRateUsdToKrw:
         typeof data.exchangeRateUsdToKrw === 'number' ? data.exchangeRateUsdToKrw : 1470.05,
+      foodBudgetAmount: typeof data.foodBudgetAmount === 'number' ? data.foodBudgetAmount : 0,
+      foodBudgetCurrency: data.foodBudgetCurrency === 'USD' ? 'USD' : 'KRW',
+      budgetPeriodMode: data.budgetPeriodMode === 'payday' ? 'payday' : 'calendar',
+      paydayDayOfMonth:
+        typeof data.paydayDayOfMonth === 'number' && data.paydayDayOfMonth >= 1 && data.paydayDayOfMonth <= 31
+          ? Math.floor(data.paydayDayOfMonth)
+          : undefined,
       createdAt: timestampToDate(data.createdAt),
       updatedAt: timestampToDate(data.updatedAt),
     };
@@ -235,6 +243,48 @@ export const updateMonthlyIncome = async (
   } catch (error) {
     console.error('Failed to update monthly income:', error);
     throw new Error('월 수입을 저장하는데 실패했습니다.');
+  }
+};
+
+export const updateFoodBudget = async (
+  accountId: string,
+  foodBudgetAmount: number,
+  foodBudgetCurrency: 'KRW' | 'USD',
+): Promise<void> => {
+  try {
+    await setDoc(
+      doc(db, 'accounts', accountId),
+      {
+        foodBudgetAmount,
+        foodBudgetCurrency,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error('Failed to update food budget:', error);
+    throw new Error('식비 예산을 저장하는데 실패했습니다.');
+  }
+};
+
+export const updateBudgetPeriodSettings = async (
+  accountId: string,
+  budgetPeriodMode: 'calendar' | 'payday',
+  paydayDayOfMonth: number,
+): Promise<void> => {
+  try {
+    await setDoc(
+      doc(db, 'accounts', accountId),
+      {
+        budgetPeriodMode,
+        paydayDayOfMonth: Math.min(31, Math.max(1, Math.floor(paydayDayOfMonth))),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error('Failed to update budget period settings:', error);
+    throw new Error('통계 기준을 저장하는데 실패했습니다.');
   }
 };
 
