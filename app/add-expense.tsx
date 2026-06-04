@@ -43,6 +43,7 @@ import {
   useIosKoreanFieldTransition,
 } from '@/lib/koreanTextInput';
 
+const MEAL_TAG_PRESETS = ['아침', '점심', '저녁'] as const;
 const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
 
 const ADD_STEPS = ['금액·유형', '시간·사진', '이유·기분', '확인'] as const;
@@ -226,6 +227,17 @@ export default function AddExpenseScreen() {
     if (!result.canceled && result.assets[0]?.uri) {
       setLocalImageUri(result.assets[0].uri);
     }
+  };
+
+  const toggleMealTag = (tag: (typeof MEAL_TAG_PRESETS)[number]) => {
+    const parts = tagsText
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const withoutMeals = parts.filter((t) => !(MEAL_TAG_PRESETS as readonly string[]).includes(t));
+    const has = parts.includes(tag);
+    const next = has ? withoutMeals : [...withoutMeals, tag];
+    setTagsText(next.join(', '));
   };
 
   const togglePresetTag = (tag: string) => {
@@ -913,6 +925,19 @@ export default function AddExpenseScreen() {
               <View style={styles.fieldBlock}>
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>태그</Text>
                 <View style={styles.equalChipRow}>
+                  {MEAL_TAG_PRESETS.map((tag) => (
+                    <Chip
+                      key={tag}
+                      compact
+                      soft
+                      style={[styles.equalChipCell, styles.softChipCell]}
+                      label={tag}
+                      active={tagsText.split(',').some((t) => t.trim() === tag)}
+                      onPress={() => toggleMealTag(tag)}
+                    />
+                  ))}
+                </View>
+                <View style={[styles.equalChipRow, styles.tagPresetSecondRow]}>
                   {TAG_PRESETS.map((tag) => (
                     <Chip
                       key={tag}
@@ -1349,6 +1374,7 @@ const styles = StyleSheet.create({
   fieldBlock: { gap: 10, marginTop: 14 },
   fieldLabel: { fontSize: 12, fontWeight: '800', letterSpacing: -0.2, marginBottom: 2 },
   equalChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  tagPresetSecondRow: { marginTop: 8 },
   equalChipCell: { flex: 1, minWidth: 0 },
   softChipCell: { borderRadius: 16 },
   stepChip: {

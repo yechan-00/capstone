@@ -13,23 +13,21 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import Animated, { FlipInEasyX, FlipOutEasyX } from 'react-native-reanimated';
 import { useAuth } from '@/hooks/useAuth';
-import { ReviewActionCard } from '@/components/ReviewActionCard';
-import { ReviewStatusCard } from '@/components/ReviewStatusCard';
+import { useRegretPatternAlertSync } from '@/hooks/useRegretPatternAlertSync';
+import { useRefreshPendingReviewCountOnFocus } from '@/hooks/usePendingReviewCount';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
 import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
-import { ensureNotificationPermission, cancelStaleScheduledDateNotifications } from '@/services/notificationService';
+import { ensureNotificationPermission } from '@/services/notificationService';
 import { scheduleService } from '@/services/scheduleService';
-import { getDaysUntil } from '@/utils/time';
 import { toUserMessage } from '@/utils/error';
 import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
 import { useTheme } from '@/theme/ThemeContext';
 
 
-import type { Expense, ExpenseCategory, Review, ReviewSchedule, ScheduleType } from '@/lib/types';
-import { expenseCardTitle } from '@/lib/expenseDisplay';
-import { scheduleRemainingLabel } from '@/lib/scheduleLabels';
+import type { Expense, ExpenseCategory, Review, ReviewSchedule } from '@/lib/types';
 import { categoryDotColor } from '@/lib/categoryColors';
 import {
   budgetPeriodForMonth,
@@ -39,10 +37,15 @@ import {
   resolveBudgetPeriodMode,
   toFoodBudgetKrw,
 } from '@/lib/budgetPeriod';
+import {
+  buildRegretPatternHomeHeadline,
+  formatRegretPatternAlertSummary,
+} from '@/lib/regretPatternAlert';
+import { loadAllTimePatternInsights } from '@/services/regretPatternAlertService';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, animationsEnabled } = useTheme();
   const { width, height } = useWindowDimensions();
   const isCompact = height < 760 || width < 420;
   const isWeb = Platform.OS === 'web';
@@ -51,18 +54,6 @@ export default function HomeScreen() {
   const [expenses, setExpenses] = React.useState<Expense[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
-  const [pendingLoading, setPendingLoading] = React.useState(true);
-  const [pendingError, setPendingError] = React.useState<unknown | null>(null);
-  const [pendingItem, setPendingItem] = React.useState<{
-    id: string;
-    expenseId: string;
-    dueType: ScheduleType;
-    title?: string;
-    amount?: number;
-    dueAt?: Date;
-    remainingLabel?: string;
-  } | null>(null);
-  const [nextDueInDays, setNextDueInDays] = React.useState<number | undefined>(undefined);
   const [currentMonth, setCurrentMonth] = React.useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -77,8 +68,7 @@ export default function HomeScreen() {
   }, [calendarRows, height, isCompact, isWeb]);
   /** 날짜 탭 시 상세 모달에 표시할 날짜 (YYYY-MM-DD) */
   const [detailDayKey, setDetailDayKey] = React.useState<string | null>(null);
-
-  const [reviewCollapsed, setReviewCollapsed] = React.useState(isCompact);
+  const [regretPatternHeadline, setRegretPatternHeadline] = React.useState<string | null>(null);
   /** 이번 달 소비 정산 카드만 접기 (캘린더는 항상 표시) */
   const [monthBreakdownCollapsed, setMonthBreakdownCollapsed] = React.useState(false);
   /** 지출 ID → 해당 지출의 가장 최근 리뷰 (캘린더 감성 색) */
@@ -89,7 +79,6 @@ export default function HomeScreen() {
   >(() => new Map());
   const lastFocusRefreshAtRef = React.useRef(0);
 
-  const pendingBusyRef = React.useRef(false);
   const monthBusyRef = React.useRef(false);
 
   const budgetPeriod = React.useMemo(() => {
@@ -146,6 +135,10 @@ export default function HomeScreen() {
   const monthTotalAmount = monthCategoryTotals.total;
   const foodBudgetKrw = account ? toFoodBudgetKrw(account) : 0;
   const foodBudgetRemaining = foodBudgetKrw > 0 ? foodBudgetKrw - monthTotalAmount : null;
+  const regretPatternAlertSummary = formatRegretPatternAlertSummary(account?.regretPatternAlertSlots ?? []);
+
+  useRegretPatternAlertSync(account, `${expenses.length}:${reviewsByExpenseId.size}`);
+  useRefreshPendingReviewCountOnFocus();
   const periodDayKeys = React.useMemo(() => {
     const keys = new Set<string>();
     for (const e of periodExpenses) keys.add(toDayKey(e.spentAt));
@@ -170,14 +163,9 @@ export default function HomeScreen() {
       setPendingScheduleByExpenseId(new Map());
       setLoading(false);
       setError(null);
-      setPendingLoading(false);
-      setPendingError(null);
-      setPendingItem(null);
-      setNextDueInDays(undefined);
       return;
     }
     void loadMonthExpenses(false);
-    void loadPendingReview(false);
   }, [account, currentMonth]);
 
   /** 날짜 모달을 열 때 해당 날 지출의 최신 리뷰를 다시 읽어 캘린더와 동일한 감성 배경이 적용되게 함 */
@@ -227,8 +215,12 @@ export default function HomeScreen() {
       // 포커스가 짧은 간격으로 반복될 때 과도한 로딩 토글(깜빡임) 방지
       if (now - lastFocusRefreshAtRef.current < 1200) return;
       lastFocusRefreshAtRef.current = now;
-      void loadPendingReview(true);
       void loadMonthExpenses(true);
+      void loadAllTimePatternInsights(account.id)
+        .then(({ weekdayInsights, timeOfDayInsights }) => {
+          setRegretPatternHeadline(buildRegretPatternHomeHeadline(weekdayInsights, timeOfDayInsights));
+        })
+        .catch(() => setRegretPatternHeadline(null));
     }, [account, currentMonth])
   );
 
@@ -279,50 +271,6 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
     }
   };
 
-  const loadPendingReview = async (silent: boolean) => {
-    if (!account) return;
-    if (pendingBusyRef.current) return;
-    pendingBusyRef.current = true;
-    try {
-      if (!silent) setPendingLoading(true);
-      setPendingError(null);
-      await scheduleService.clearExpiredReviewReminderNotifications(account.id);
-      await cancelStaleScheduledDateNotifications();
-      const pendingSchedules = await scheduleService.getPendingSchedules(account.id);
-      if (pendingSchedules.length > 0) {
-        const schedule = pendingSchedules[0];
-        const expense = await expenseService.getById(schedule.expenseId);
-        setPendingItem({
-          id: schedule.id,
-          expenseId: schedule.expenseId,
-          dueType: schedule.type,
-          title: expenseCardTitle(expense),
-          amount: expense?.amount,
-          dueAt: schedule.dueAt,
-          remainingLabel: scheduleRemainingLabel(schedule),
-        });
-        setNextDueInDays(undefined);
-        return;
-      }
-
-      const upcoming = await scheduleService.getNextUpcomingSchedule(account.id);
-      setPendingItem(null);
-      setNextDueInDays(upcoming?.dueAt ? getDaysUntil(upcoming.dueAt) : undefined);
-    } catch (err: unknown) {
-      console.error('[pendingSchedules] load failed', err);
-      setPendingError(err);
-      setPendingItem(null);
-      setNextDueInDays(undefined);
-    } finally {
-      if (!silent) setPendingLoading(false);
-      pendingBusyRef.current = false;
-    }
-  };
-
-  const handleReviewPress = async (schedule: { id: string; expenseId: string }) => {
-    router.push({ pathname: '/review', params: { expenseId: schedule.expenseId, scheduleId: schedule.id } });
-  };
-
   const openReviewForExpense = (expenseId: string, scheduleId: string) => {
     setDetailDayKey(null);
     router.push({ pathname: '/review', params: { expenseId, scheduleId } });
@@ -352,7 +300,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               try {
                 await expenseService.delete(expenseId);
                 const data = await loadMonthExpenses(false);
-                await loadPendingReview(false);
+                (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
                 if (dayKey && data && !data.some((e) => toDayKey(e.spentAt) === dayKey)) {
                   setDetailDayKey((k) => (k === dayKey ? null : k));
                 }
@@ -399,54 +347,28 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           <Text style={[styles.offlineText, { color: colors.offlineText }]}>네트워크 연결이 필요합니다</Text>
         </View>
       )}
-      <View style={styles.reviewSection}>
-        <View style={[styles.reviewCardOuter, { backgroundColor: colors.surface, borderColor: colors.border }, cardElev]}>
-          <Pressable
-            onPress={() => setReviewCollapsed((v) => !v)}
-            style={styles.reviewCardHeader}
-            accessibilityRole="button"
-            accessibilityLabel={reviewCollapsed ? '리뷰 알림 펼치기' : '리뷰 알림 접기'}
+      {regretPatternHeadline ? (
+        <View style={styles.patternSection}>
+          <View
+            style={[
+              styles.patternCardOuter,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              cardElev,
+            ]}
           >
-            <View style={[styles.reviewBellWrap, { backgroundColor: isDark ? colors.surfaceMuted : '#FFF8E6' }]}>
-              <MaterialIcons name="notifications-none" size={20} color={isDark ? '#fbbf24' : '#d97706'} />
+            <View style={[styles.patternIconWrap, { backgroundColor: isDark ? colors.surfaceMuted : '#EEF2FF' }]}>
+              <MaterialIcons name="schedule" size={20} color={isDark ? '#a5b4fc' : '#4f46e5'} />
             </View>
-            <Text style={[styles.reviewCardHeadTitle, { color: colors.text }]}>리뷰 알림</Text>
-            <View style={styles.reviewHeaderSpacer} />
-            <Text style={[styles.reviewExpandLabel, { color: colors.textMuted }]}>
-              {reviewCollapsed ? '펼치기' : '접기'}
-            </Text>
-            <MaterialIcons
-              name={reviewCollapsed ? 'expand-more' : 'expand-less'}
-              size={22}
-              color={colors.textMuted}
-            />
-          </Pressable>
-          {!reviewCollapsed ? (
-            <View style={[styles.reviewCardBody, { borderTopColor: colors.border }]}>
-              {pendingLoading ? (
-                pendingItem ? (
-                  <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
-                ) : (
-                  <ReviewStatusCard nextDueInDays={undefined} notificationsEnabled />
-                )
-              ) : pendingError ? (
-                <ErrorRetryCard
-                  title="평가 목록을 불러오지 못했어요"
-                  desc={toUserMessage(pendingError)}
-                  onRetry={() => {
-                    void loadPendingReview(false);
-                  }}
-                />
-              ) : pendingItem ? (
-                <ReviewActionCard item={pendingItem} onPressReview={handleReviewPress} />
-              ) : (
-                <ReviewStatusCard nextDueInDays={nextDueInDays} notificationsEnabled />
-              )}
+            <View style={styles.patternTextWrap}>
+              <Text style={[styles.patternTitle, { color: colors.text }]}>후회 많은 시간</Text>
+              <Text style={[styles.patternHeadline, { color: colors.textSec }]}>{regretPatternHeadline}</Text>
+              {account.regretPatternAlertEnabled !== false && account.regretPatternAlertSlots?.length ? (
+                <Text style={[styles.patternMeta, { color: colors.textMuted }]}>{regretPatternAlertSummary}</Text>
+              ) : null}
             </View>
-          ) : null}
+          </View>
         </View>
-      </View>
-
+      ) : null}
       <View style={styles.spendingHeader}>
         <Text style={[styles.spendingHeaderTitle, { color: colors.textSec }]}>이번 달 요약</Text>
       </View>
@@ -489,7 +411,12 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           </View>
 
           {monthBreakdownCollapsed ? (
-            <View style={styles.breakdownCollapsedBlock}>
+            <Animated.View
+              key="breakdown-collapsed"
+              style={styles.breakdownCollapsedBlock}
+              entering={animationsEnabled ? FlipInEasyX.duration(320) : undefined}
+              exiting={animationsEnabled ? FlipOutEasyX.duration(200) : undefined}
+            >
               <View style={styles.breakdownCollapsedTotalRow}>
                 <Text style={[styles.breakdownCollapsedTotalLabel, { color: colors.text }]}>합계</Text>
                 <Text style={[styles.breakdownCollapsedTotalAmount, { color: colors.primary }]}>
@@ -512,9 +439,13 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                   </View>
                 ))}
               </View>
-            </View>
+            </Animated.View>
           ) : (
-            <>
+            <Animated.View
+              key="breakdown-expanded"
+              entering={animationsEnabled ? FlipInEasyX.duration(320) : undefined}
+              exiting={animationsEnabled ? FlipOutEasyX.duration(200) : undefined}
+            >
               <View style={[styles.breakdownDivider, { backgroundColor: colors.border }]} />
 
               {(
@@ -551,7 +482,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                     : `식비 예산 초과 ${Math.abs(foodBudgetRemaining).toLocaleString()}원`}
                 </Text>
               ) : null}
-            </>
+            </Animated.View>
           )}
         </View>
 
@@ -1077,37 +1008,30 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   spendingHeaderTitle: { fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
-  reviewSection: {
+  patternSection: {
     marginTop: 12,
     marginHorizontal: 16,
+    marginBottom: 4,
   },
-  reviewCardOuter: {
+  patternCardOuter: {
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-  },
-  reviewCardHeader: {
+    padding: 14,
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    gap: 10,
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  reviewBellWrap: {
+  patternIconWrap: {
     width: 40,
     height: 40,
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reviewCardHeadTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
-  reviewHeaderSpacer: { flex: 1 },
-  reviewExpandLabel: { fontSize: 13, fontWeight: '700' },
-  reviewCardBody: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingBottom: 14,
-    paddingTop: 12,
-  },
+  patternTextWrap: { flex: 1, gap: 4 },
+  patternTitle: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  patternHeadline: { fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  patternMeta: { fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 2 },
   list: {
     padding: 16,
     paddingBottom: 120,

@@ -5,15 +5,26 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Modal,
+  Pressable,
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   PanResponder,
   Dimensions,
-  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { useTheme } from '@/theme/ThemeContext';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const { width: SW } = Dimensions.get('window');
 const PICKER_W = SW - 48;
@@ -63,8 +74,49 @@ interface Props {
 }
 
 export function ColorPickerModal({ visible, initialColor, onClose, onSelect, isDark }: Props) {
+  const { animationsEnabled } = useTheme();
   const [hsv, setHsv] = useState<[number, number, number]>(() => hexToHsv(initialColor));
   const [h, s, v] = hsv;
+  const [render, setRender] = useState(visible);
+  const sheetOpen = useSharedValue(visible ? 1 : 0);
+  const backdropOpacity = useSharedValue(visible ? 1 : 0);
+
+  useEffect(() => {
+    if (visible) {
+      setRender(true);
+      if (!animationsEnabled) {
+        sheetOpen.value = 1;
+        backdropOpacity.value = 1;
+        return;
+      }
+      sheetOpen.value = 0;
+      backdropOpacity.value = 0;
+      backdropOpacity.value = withTiming(1, { duration: 220 });
+      sheetOpen.value = withSpring(1, { damping: 18, stiffness: 200, mass: 0.75 });
+    } else {
+      if (!animationsEnabled) {
+        setRender(false);
+        return;
+      }
+      backdropOpacity.value = withTiming(0, { duration: 200 });
+      sheetOpen.value = withTiming(
+        0,
+        { duration: 220, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) runOnJS(setRender)(false);
+        },
+      );
+    }
+  }, [visible, animationsEnabled, sheetOpen, backdropOpacity]);
+
+  const backdropAnim = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+
+  const sheetAnim = useAnimatedStyle(() => ({
+    opacity: 0.5 + 0.5 * sheetOpen.value,
+    transform: [{ translateY: (1 - sheetOpen.value) * 36 }],
+  }));
 
   // visible이 true로 바뀔 때 initialColor 동기화
   React.useEffect(() => {
@@ -117,19 +169,18 @@ export function ColorPickerModal({ visible, initialColor, onClose, onSelect, isD
   const textColor = isDark ? '#E2E8F0' : '#1c2434';
   const borderColor = isDark ? '#2A3548' : '#e4e8f0';
 
-  if (!visible) return null;
+  if (!render) return null;
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
-      {/* 배경 딤 */}
-      <TouchableOpacity
-        style={styles.backdrop}
-        activeOpacity={1}
+    <Modal visible={render} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
+      <View style={styles.root}>
+      <AnimatedPressable
+        style={[styles.backdrop, backdropAnim]}
         onPress={onClose}
+        accessibilityLabel="닫기"
       />
 
-      {/* 피커 시트 */}
-      <View style={[styles.sheet, { backgroundColor: bg, borderColor }]}>
+      <Animated.View style={[styles.sheet, { backgroundColor: bg, borderColor }, sheetAnim]}>
         <Text style={[styles.title, { color: textColor }]}>색상 선택</Text>
 
         {/* SV 패널 */}
@@ -196,22 +247,26 @@ export function ColorPickerModal({ visible, initialColor, onClose, onSelect, isD
 
         {/* 버튼 */}
         <View style={[styles.btnRow, { borderTopColor: borderColor }]}>
-          <TouchableOpacity style={styles.btn} onPress={onClose}>
+          <Pressable style={styles.btn} onPress={onClose}>
             <Text style={[styles.btnText, { color: isDark ? '#94A3B8' : '#5c6578' }]}>취소</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             style={[styles.btn, styles.btnOk, { backgroundColor: currentHex }]}
             onPress={() => { onSelect(currentHex); onClose(); }}
           >
             <Text style={[styles.btnText, { color: '#fff', fontWeight: '900' }]}>적용</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
+      </Animated.View>
       </View>
-    </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',

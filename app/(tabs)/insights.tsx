@@ -1,5 +1,5 @@
 // @refresh reset
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -13,24 +13,31 @@ import {
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FlipInEasyX, FlipOutEasyX } from 'react-native-reanimated';
+import { AnimatedBarFill } from '@/components/AnimatedBarFill';
 import { CategoryDonutChart } from '@/components/CategoryDonutChart';
 import { InsightHelpModal } from '@/components/InsightHelpModal';
-import { MoodInsightDetailModal } from '@/components/MoodInsightDetailModal';
+import { WeekdayTimeRegretCard } from '@/components/WeekdayTimeRegretCard';
 import { toMonthlyIncomeKrw } from '@/lib/accountSettings';
-import { formatBudgetPeriodRange, toFoodBudgetKrw } from '@/lib/budgetPeriod';
-import type { MoodInsightBucketKey } from '@/lib/expenseMood';
-import { aggregateMoodInsightsByBucket, buildMoodInsightDetail, buildMoodInsightHeadline } from '@/lib/moodInsightDetail';
-import type { MoodInsightDetail } from '@/lib/moodInsightDetail';
+import {
+  budgetPeriodForMonth,
+  currentInsightsMonthWindow,
+  formatBudgetPeriodRange,
+  formatShortBudgetPeriodRange,
+  isCurrentInsightsWindow,
+  resolveBudgetPeriodMode,
+  toFoodBudgetKrw,
+} from '@/lib/budgetPeriod';
+import { aggregateMoodInsightsByBucket, buildMoodInsightHeadline } from '@/lib/moodInsightDetail';
 import { getInsightHelpContent, type InsightHelpId } from '@/lib/insightCardHelp';
 import { currentInsightsWindow, useInsights } from '@/hooks/useInsights';
+import { useRegretPatternAlertSync } from '@/hooks/useRegretPatternAlertSync';
 import { useAuth } from '@/hooks/useAuth';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
 import { toUserMessage } from '@/utils/error';
 import { useTheme } from '@/theme/ThemeContext';
 import type { CategoryInsight, InsightsWindow } from '@/lib/types';
 import { CATEGORY_DOT_COLORS, canonicalFoodCategory } from '@/lib/categoryColors';
-import { expenseService } from '@/services/expenseService';
-import { reviewService } from '@/services/reviewService';
 
 /** 드롭다운에 보이는 기간 옵션 수 (나머지는 스크롤) */
 const PERIOD_DROPDOWN_VISIBLE_ROWS = 3;
@@ -57,41 +64,19 @@ function formatPeriodSummaryLabel(
   return formatWindowLabel(window);
 }
 
-function buildMonthWindows(count = 24): InsightsWindow[] {
-  const options: InsightsWindow[] = [];
-  const cursor = new Date();
-  cursor.setDate(1);
-  cursor.setHours(12, 0, 0, 0);
-  for (let i = 0; i < count; i += 1) {
-    options.push({
-      mode: 'month',
-      year: cursor.getFullYear(),
-      monthIndex: cursor.getMonth(),
-    });
-    cursor.setMonth(cursor.getMonth() - 1);
-  }
-  return options;
+function formatMonthOptionLabel(
+  year: number,
+  monthIndex: number,
+  account: ReturnType<typeof useAuth>['account'],
+): string {
+  const monthLabel = `${monthIndex + 1}월`;
+  if (resolveBudgetPeriodMode(account) !== 'payday') return monthLabel;
+  const period = budgetPeriodForMonth(year, monthIndex, account);
+  return `${monthLabel} · ${formatShortBudgetPeriodRange(period.start, period.end)}`;
 }
 
-function buildYearWindows(count = 6): InsightsWindow[] {
-  const year = new Date().getFullYear();
-  return Array.from({ length: count }, (_, i) => ({ mode: 'year' as const, year: year - i }));
-}
-
-function windowsEqual(a: InsightsWindow, b: InsightsWindow): boolean {
-  if (a.mode !== b.mode || a.year !== b.year) return false;
-  if (a.mode === 'month' && b.mode === 'month') return a.monthIndex === b.monthIndex;
-  return true;
-}
-
-function periodOptionKey(option: InsightsWindow): string {
-  return option.mode === 'month' ? `${option.year}-${option.monthIndex}` : `${option.year}`;
-}
-
-function isCurrentWindow(window: InsightsWindow): boolean {
-  const now = new Date();
-  if (window.mode === 'year') return window.year === now.getFullYear();
-  return window.year === now.getFullYear() && window.monthIndex === now.getMonth();
+function currentPeriodShortLabel(account: ReturnType<typeof useAuth>['account']): string {
+  return resolveBudgetPeriodMode(account) === 'payday' ? '이번 주기' : '이번 달';
 }
 
 function regretBarColor(pct: number, colors: { success: string; logoutText: string }) {
@@ -202,21 +187,51 @@ export default function InsightsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { account } = useAuth();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, animationsEnabled } = useTheme();
   const [insightsWindow, setInsightsWindow] = useState<InsightsWindow>(() => currentInsightsWindow('month'));
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
-  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  const [yearMenuOpen, setYearMenuOpen] = useState(false);
+  const [monthMenuOpen, setMonthMenuOpen] = useState(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [foodBudgetCollapsed, setFoodBudgetCollapsed] = useState(false);
   const [incomeCollapsed, setIncomeCollapsed] = useState(false);
-  const [moodDetailVisible, setMoodDetailVisible] = useState(false);
-  const [moodDetailLoading, setMoodDetailLoading] = useState(false);
-  const [moodDetail, setMoodDetail] = useState<MoodInsightDetail | null>(null);
   const [helpId, setHelpId] = useState<InsightHelpId | null>(null);
+  const [helpOrigin, setHelpOrigin] = useState<{ x: number; y: number } | null>(null);
+  const openHelp = useCallback((id: InsightHelpId, e?: { nativeEvent?: { pageX?: number; pageY?: number } }) => {
+    const ne = e?.nativeEvent;
+    if (ne && typeof ne.pageX === 'number' && typeof ne.pageY === 'number') {
+      setHelpOrigin({ x: ne.pageX, y: ne.pageY });
+    } else {
+      setHelpOrigin(null);
+    }
+    setHelpId(id);
+  }, []);
+  const [chartReplay, setChartReplay] = useState(0);
+  const replayCharts = useCallback(() => setChartReplay((r) => r + 1), []);
   const { insights, loading, error, refresh } = useInsights(insightsWindow);
+  useRegretPatternAlertSync(
+    account,
+    insights
+      ? `${insights.weekdayInsights.reduce((sum, row) => sum + row.totalCount, 0)}:${insights.timeOfDayInsights.reduce((sum, row) => sum + row.totalCount, 0)}`
+      : '',
+  );
   const periodMode = insightsWindow.mode;
+  const isPaydayInsights = resolveBudgetPeriodMode(account) === 'payday';
   const hasMonthlyIncome = account ? toMonthlyIncomeKrw(account) > 0 : false;
   const hasFoodBudget = account ? toFoodBudgetKrw(account) > 0 : false;
+
+  // 계정 로드 시 월급날/달력 기준 '현재 주기'로 맞춤
+  useEffect(() => {
+    if (!account) return;
+    setInsightsWindow(currentInsightsMonthWindow(account));
+  }, [account?.id]);
+
+  // 월급날 설정 변경 시, 현재 주기를 보고 있으면 새 주기로 갱신
+  useEffect(() => {
+    if (!account) return;
+    setInsightsWindow((prev) =>
+      isCurrentInsightsWindow(prev, account) ? currentInsightsMonthWindow(account) : prev,
+    );
+  }, [account?.budgetPeriodMode, account?.paydayDayOfMonth]);
 
   const cardElev =
     !isDark && Platform.OS !== 'web'
@@ -250,7 +265,7 @@ export default function InsightsScreen() {
           marginTop: 6,
           minWidth: 112,
           borderRadius: 12,
-          borderWidth: StyleSheet.hairlineWidth,
+          borderWidth: 1.5,
           borderColor: colors.border,
           backgroundColor: colors.surface,
           overflow: 'hidden',
@@ -273,7 +288,7 @@ export default function InsightsScreen() {
           minHeight: PERIOD_DROPDOWN_ROW_HEIGHT,
           paddingHorizontal: 14,
           paddingVertical: 12,
-          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: 1.5,
           borderBottomColor: colors.border,
           justifyContent: 'center',
         },
@@ -284,7 +299,12 @@ export default function InsightsScreen() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: 1,
-          paddingVertical: 4,
+          paddingVertical: 8,
+          paddingHorizontal: 10,
+          borderRadius: 10,
+          borderWidth: 1.5,
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
         },
         periodSelectText: { fontSize: 15, fontWeight: '800', color: colors.text, letterSpacing: -0.2 },
         periodSelectBracket: { fontSize: 15, fontWeight: '700', color: colors.textMuted },
@@ -346,6 +366,17 @@ export default function InsightsScreen() {
           backgroundColor: colors.surfaceMuted,
         },
         moodBarFill: { height: '100%', borderRadius: 4 },
+        moodSeeAllBtn: {
+          marginTop: 10,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          borderRadius: 12,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        },
+        moodSeeAllText: { fontSize: 14, fontWeight: '800' },
         insightCard: {
           borderRadius: 14,
           borderWidth: StyleSheet.hairlineWidth,
@@ -506,27 +537,32 @@ export default function InsightsScreen() {
     [pullRefreshing, onPullRefresh, colors.primary],
   );
 
-  const periodOptions = useMemo(
-    () => (insightsWindow.mode === 'month' ? buildMonthWindows() : buildYearWindows()),
-    [insightsWindow.mode],
-  );
+  // 연도 옵션: 올해부터 과거 6년
+  const yearOptions = useMemo(() => {
+    const cy = new Date().getFullYear();
+    return Array.from({ length: 6 }, (_, i) => cy - i);
+  }, []);
 
-  const selectPeriodMode = (mode: 'month' | 'year') => {
-    setModeMenuOpen(false);
-    setPeriodMenuOpen(false);
-    if (mode === insightsWindow.mode) return;
-    if (mode === 'year') {
-      setInsightsWindow({ mode: 'year', year: insightsWindow.year });
-      return;
-    }
-    const now = new Date();
-    const monthIndex =
+  const selectYear = (year: number) => {
+    setYearMenuOpen(false);
+    setMonthMenuOpen(false);
+    if (year === insightsWindow.year) return;
+    setInsightsWindow(
       insightsWindow.mode === 'month'
-        ? insightsWindow.monthIndex
-        : insightsWindow.year === now.getFullYear()
-          ? now.getMonth()
-          : 0;
-    setInsightsWindow({ mode: 'month', year: insightsWindow.year, monthIndex });
+        ? { mode: 'month', year, monthIndex: insightsWindow.monthIndex }
+        : { mode: 'year', year },
+    );
+  };
+
+  // 월 선택(1~12) 또는 연간 전체
+  const selectMonth = (monthIndex: number | 'year') => {
+    setYearMenuOpen(false);
+    setMonthMenuOpen(false);
+    if (monthIndex === 'year') {
+      setInsightsWindow({ mode: 'year', year: insightsWindow.year });
+    } else {
+      setInsightsWindow({ mode: 'month', year: insightsWindow.year, monthIndex });
+    }
   };
 
   if (loading && !insights) {
@@ -572,23 +608,6 @@ export default function InsightsScreen() {
       ? `${formatWindowLabel(insightsWindow)} · ${formatBudgetPeriodRange(insights.period.start, insights.period.end)}`
       : formatWindowLabel(insightsWindow);
 
-  const openMoodDetail = async (bucket: MoodInsightBucketKey) => {
-    if (!account || !insights) return;
-    setMoodDetailVisible(true);
-    setMoodDetailLoading(true);
-    setMoodDetail(null);
-    try {
-      const { start, end } = insights.period;
-      const [expenses, reviews] = await Promise.all([
-        expenseService.getByAccountIdInRange(account.id, start, end),
-        reviewService.getByAccountId(account.id),
-      ]);
-      const periodReviews = reviews.filter((r) => r.reviewedAt >= start && r.reviewedAt <= end);
-      setMoodDetail(buildMoodInsightDetail(bucket, expenses, periodReviews));
-    } finally {
-      setMoodDetailLoading(false);
-    }
-  };
   const income = insights.incomeInsight;
   const foodBudget = insights.foodBudgetInsight;
   const spendBarPct = income ? Math.min(100, Math.max(0, income.spendRatioPercent)) : 0;
@@ -607,7 +626,7 @@ export default function InsightsScreen() {
   );
 
   const regretHeroSection = (
-    <View style={[styles.card, cardElev, styles.regretHeroCard]}>
+    <Pressable onPress={replayCharts} style={[styles.card, cardElev, styles.regretHeroCard]}>
       <View style={styles.regretHeroBody}>
         <View style={styles.regretHeroTop}>
           <View style={{ flex: 1, gap: 4 }}>
@@ -617,7 +636,7 @@ export default function InsightsScreen() {
             </Text>
           </View>
           <Pressable
-            onPress={() => setHelpId('overallRegret')}
+            onPress={(e) => openHelp('overallRegret', e)}
             hitSlop={8}
             style={styles.cardHelpBtn}
             accessibilityRole="button"
@@ -635,11 +654,11 @@ export default function InsightsScreen() {
         </View>
 
         <View style={styles.regretHeroBarTrack}>
-          <View
-            style={[
-              styles.regretHeroBarFill,
-              { width: `${regretBarPct}%`, backgroundColor: regretColor },
-            ]}
+          <AnimatedBarFill
+            pct={regretBarPct}
+            duration={750}
+            replay={chartReplay}
+            style={[styles.regretHeroBarFill, { backgroundColor: regretColor }]}
           />
         </View>
 
@@ -656,23 +675,33 @@ export default function InsightsScreen() {
 
         <Text style={styles.regretHeroSummary}>{regretSummary}</Text>
       </View>
-    </View>
+    </Pressable>
   );
 
   const foodBudgetSection = foodBudget ? (
     <View style={[styles.card, cardElev, styles.incomeHero, foodBudgetCollapsed && styles.cardCollapsed]}>
       {foodBudgetCollapsed ? (
-        <CollapsedBudgetHeader
-          title="식비 예산"
-          spendRatioPercent={foodBudget.spendRatioPercent}
-          barPct={foodBarPct}
-          barColor={spendRatioBarColor(foodBudget.spendRatioPercent, colors)}
-          onToggle={() => setFoodBudgetCollapsed(false)}
-          styles={styles}
-          colors={colors}
-        />
+        <Animated.View
+          key="food-collapsed"
+          entering={animationsEnabled ? FlipInEasyX.duration(340) : undefined}
+          exiting={animationsEnabled ? FlipOutEasyX.duration(220) : undefined}
+        >
+          <CollapsedBudgetHeader
+            title="식비 예산"
+            spendRatioPercent={foodBudget.spendRatioPercent}
+            barPct={foodBarPct}
+            barColor={spendRatioBarColor(foodBudget.spendRatioPercent, colors)}
+            onToggle={() => setFoodBudgetCollapsed(false)}
+            styles={styles}
+            colors={colors}
+          />
+        </Animated.View>
       ) : (
-        <>
+        <Animated.View
+          key="food-expanded"
+          entering={animationsEnabled ? FlipInEasyX.duration(340) : undefined}
+          exiting={animationsEnabled ? FlipOutEasyX.duration(220) : undefined}
+        >
           <Pressable
             onPress={() => setFoodBudgetCollapsed(true)}
             style={styles.budgetCardHeader}
@@ -685,7 +714,7 @@ export default function InsightsScreen() {
                 <Text style={[styles.cardSub, { marginTop: 0 }]}>
                   {foodBudget.periodMode === 'payday'
                     ? `${foodBudget.periodLabel} · ${formatBudgetPeriodRange(insights.period.start, insights.period.end)}`
-                    : `${isCurrentWindow(insightsWindow) ? '이번 달' : formatWindowLabel(insightsWindow)} · 예산 ${formatKrw(foodBudget.budgetKrw)}`}
+                    : `${isCurrentInsightsWindow(insightsWindow, account) ? currentPeriodShortLabel(account) : formatWindowLabel(insightsWindow)} · 예산 ${formatKrw(foodBudget.budgetKrw)}`}
                 </Text>
               </View>
               <View style={styles.budgetCollapsedToggle}>
@@ -734,7 +763,7 @@ export default function InsightsScreen() {
             다른 사용자 평균·상위 % 비교는 데이터가 더 모이면 제공할 예정이에요.
           </Text>
           </View>
-        </>
+        </Animated.View>
       )}
     </View>
   ) : !hasFoodBudget ? (
@@ -754,17 +783,27 @@ export default function InsightsScreen() {
   const incomeSection = income ? (
     <View style={[styles.card, cardElev, styles.incomeHero, incomeCollapsed && styles.cardCollapsed]}>
       {incomeCollapsed ? (
-        <CollapsedBudgetHeader
-          title="월 수입 대비 소비"
-          spendRatioPercent={income.spendRatioPercent}
-          barPct={spendBarPct}
-          barColor={spendRatioBarColor(income.spendRatioPercent, colors)}
-          onToggle={() => setIncomeCollapsed(false)}
-          styles={styles}
-          colors={colors}
-        />
+        <Animated.View
+          key="income-collapsed"
+          entering={animationsEnabled ? FlipInEasyX.duration(340) : undefined}
+          exiting={animationsEnabled ? FlipOutEasyX.duration(220) : undefined}
+        >
+          <CollapsedBudgetHeader
+            title="월 수입 대비 소비"
+            spendRatioPercent={income.spendRatioPercent}
+            barPct={spendBarPct}
+            barColor={spendRatioBarColor(income.spendRatioPercent, colors)}
+            onToggle={() => setIncomeCollapsed(false)}
+            styles={styles}
+            colors={colors}
+          />
+        </Animated.View>
       ) : (
-        <>
+        <Animated.View
+          key="income-expanded"
+          entering={animationsEnabled ? FlipInEasyX.duration(340) : undefined}
+          exiting={animationsEnabled ? FlipOutEasyX.duration(220) : undefined}
+        >
           <Pressable
             onPress={() => setIncomeCollapsed(true)}
             style={styles.budgetCardHeader}
@@ -776,8 +815,8 @@ export default function InsightsScreen() {
                 <Text style={styles.cardTitle}>월 수입 대비 소비</Text>
                 <Text style={[styles.cardSub, { marginTop: 0 }]}>
                   {periodMode === 'year'
-                    ? `${isCurrentWindow(insightsWindow) ? '올해' : formatWindowLabel(insightsWindow)} 총 소비 · 예산(월 수입×12) ${formatKrw(income.budgetKrw)}`
-                    : `${isCurrentWindow(insightsWindow) ? '이번 달' : formatWindowLabel(insightsWindow)} · 월 수입 ${formatKrw(income.monthlyIncomeKrw)}`}
+                    ? `${isCurrentInsightsWindow(insightsWindow, account) ? '올해' : formatWindowLabel(insightsWindow)} 총 소비 · 예산(월 수입×12) ${formatKrw(income.budgetKrw)}`
+                    : `${isCurrentInsightsWindow(insightsWindow, account) ? currentPeriodShortLabel(account) : formatWindowLabel(insightsWindow)} · 월 수입 ${formatKrw(income.monthlyIncomeKrw)}`}
                 </Text>
               </View>
               <View style={styles.budgetCollapsedToggle}>
@@ -823,7 +862,7 @@ export default function InsightsScreen() {
               : `예산 대비 잔여 ${formatKrw(income.remainingKrw)}`}
           </Text>
           </View>
-        </>
+        </Animated.View>
       )}
     </View>
   ) : !hasMonthlyIncome ? (
@@ -876,80 +915,100 @@ export default function InsightsScreen() {
       refreshControl={scrollRefreshControl}
     >
       <View style={styles.periodRow}>
-        <View style={[styles.periodSelectCol, modeMenuOpen && styles.periodSelectColRaised]}>
+        {/* 연도 선택 */}
+        <View style={[styles.periodSelectCol, yearMenuOpen && styles.periodSelectColRaised]}>
           <Pressable
             onPress={() => {
-              setPeriodMenuOpen(false);
-              setModeMenuOpen((open) => !open);
+              setMonthMenuOpen(false);
+              setYearMenuOpen((open) => !open);
             }}
             style={styles.periodSelect}
             accessibilityRole="button"
-            accessibilityLabel="기간 단위 선택"
-            accessibilityState={{ expanded: modeMenuOpen }}
+            accessibilityLabel="연도 선택"
+            accessibilityState={{ expanded: yearMenuOpen }}
           >
             <Text style={styles.periodSelectBracket}>[</Text>
-            <Text style={styles.periodSelectText}>{periodMode === 'month' ? '월별' : '연별'}</Text>
+            <Text style={styles.periodSelectText}>{insightsWindow.year}년</Text>
             <MaterialIcons name="arrow-drop-down" size={18} color={colors.textMuted} />
             <Text style={styles.periodSelectBracket}>]</Text>
           </Pressable>
-          {modeMenuOpen ? (
+          {yearMenuOpen ? (
             <View style={styles.periodDropdown}>
-              {(['month', 'year'] as const).map((mode, index, arr) => {
-                const active = insightsWindow.mode === mode;
-                const isLast = index === arr.length - 1;
-                return (
-                  <Pressable
-                    key={mode}
-                    style={[styles.periodDropdownItem, isLast && styles.periodDropdownItemLast]}
-                    onPress={() => selectPeriodMode(mode)}
-                  >
-                    <Text style={[styles.periodDropdownText, active && styles.periodDropdownTextActive]}>
-                      {mode === 'month' ? '월별' : '연별'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-        </View>
-        <View style={[styles.periodSelectCol, periodMenuOpen && styles.periodSelectColRaised]}>
-          <Pressable
-            onPress={() => {
-              setModeMenuOpen(false);
-              setPeriodMenuOpen((open) => !open);
-            }}
-            style={styles.periodSelect}
-            accessibilityRole="button"
-            accessibilityLabel="조회 기간 선택"
-            accessibilityState={{ expanded: periodMenuOpen }}
-          >
-            <Text style={styles.periodSelectBracket}>[</Text>
-            <Text style={styles.periodSelectText}>{formatWindowLabel(insightsWindow)}</Text>
-            <MaterialIcons name="arrow-drop-down" size={18} color={colors.textMuted} />
-            <Text style={styles.periodSelectBracket}>]</Text>
-          </Pressable>
-          {periodMenuOpen ? (
-            <View style={[styles.periodDropdown, styles.periodDropdownWide]}>
               <ScrollView
                 style={styles.periodDropdownScroll}
                 nestedScrollEnabled
                 showsVerticalScrollIndicator
                 keyboardShouldPersistTaps="handled"
               >
-                {periodOptions.map((option, index, arr) => {
-                  const active = windowsEqual(option, insightsWindow);
+                {yearOptions.map((year, index, arr) => {
+                  const active = insightsWindow.year === year;
                   const isLast = index === arr.length - 1;
                   return (
                     <Pressable
-                      key={periodOptionKey(option)}
+                      key={year}
                       style={[styles.periodDropdownItem, isLast && styles.periodDropdownItemLast]}
-                      onPress={() => {
-                        setInsightsWindow(option);
-                        setPeriodMenuOpen(false);
-                      }}
+                      onPress={() => selectYear(year)}
                     >
                       <Text style={[styles.periodDropdownText, active && styles.periodDropdownTextActive]}>
-                        {formatWindowLabel(option)}
+                        {year}년
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : null}
+        </View>
+        {/* 월 선택 */}
+        <View style={[styles.periodSelectCol, monthMenuOpen && styles.periodSelectColRaised]}>
+          <Pressable
+            onPress={() => {
+              setYearMenuOpen(false);
+              setMonthMenuOpen((open) => !open);
+            }}
+            style={styles.periodSelect}
+            accessibilityRole="button"
+            accessibilityLabel="월 선택"
+            accessibilityState={{ expanded: monthMenuOpen }}
+          >
+            <Text style={styles.periodSelectBracket}>[</Text>
+            <Text style={styles.periodSelectText}>
+              {insightsWindow.mode === 'year'
+                ? '연간'
+                : formatMonthOptionLabel(insightsWindow.year, insightsWindow.monthIndex, account)}
+            </Text>
+            <MaterialIcons name="arrow-drop-down" size={18} color={colors.textMuted} />
+            <Text style={styles.periodSelectBracket}>]</Text>
+          </Pressable>
+          {monthMenuOpen ? (
+            <View style={[styles.periodDropdown, styles.periodDropdownWide, isPaydayInsights && { minWidth: 196 }]}>
+              <ScrollView
+                style={styles.periodDropdownScroll}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                keyboardShouldPersistTaps="handled"
+              >
+                {([
+                  { key: 'year' as const, label: '연간', value: 'year' as const },
+                  ...Array.from({ length: 12 }, (_, m) => ({
+                    key: `m${m}`,
+                    label: formatMonthOptionLabel(insightsWindow.year, m, account),
+                    value: m,
+                  })),
+                ]).map((option, index, arr) => {
+                  const active =
+                    option.value === 'year'
+                      ? insightsWindow.mode === 'year'
+                      : insightsWindow.mode === 'month' && insightsWindow.monthIndex === option.value;
+                  const isLast = index === arr.length - 1;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      style={[styles.periodDropdownItem, isLast && styles.periodDropdownItemLast]}
+                      onPress={() => selectMonth(option.value)}
+                    >
+                      <Text style={[styles.periodDropdownText, active && styles.periodDropdownTextActive]}>
+                        {option.label}
                       </Text>
                     </Pressable>
                   );
@@ -959,6 +1018,11 @@ export default function InsightsScreen() {
           ) : null}
         </View>
       </View>
+      {isPaydayInsights && insightsWindow.mode === 'month' && insights?.period ? (
+        <Text style={[styles.cardSub, { marginTop: -4, marginBottom: 0 }]}>
+          {formatBudgetPeriodRange(insights.period.start, insights.period.end)}
+        </Text>
+      ) : null}
 
       {regretHeroSection}
 
@@ -968,13 +1032,13 @@ export default function InsightsScreen() {
 
       {insightSection}
 
-      <View style={[styles.card, cardElev]}>
+      <Pressable style={[styles.card, cardElev]} onPress={replayCharts}>
         <Text style={styles.cardTitle}>카테고리별 소비 비중</Text>
         <Text style={styles.cardSub}>기간 내 기록 건수 기준 비율이에요.</Text>
         {shareTotal > 0 ? (
           <>
             <View style={styles.donutBlock}>
-              <CategoryDonutChart slices={donutSlices} centerLabel={`${shareTotal}건`} size={188} />
+              <CategoryDonutChart slices={donutSlices} centerLabel={`${shareTotal}건`} size={188} replay={chartReplay} />
             </View>
             {shareRows.map((r) => (
               <View key={r.key} style={styles.legendRow}>
@@ -989,13 +1053,13 @@ export default function InsightsScreen() {
         ) : (
           <Text style={[styles.cardSub, { marginTop: 4 }]}>이 기간에 기록된 소비가 없어요.</Text>
         )}
-      </View>
+      </Pressable>
 
-      <View style={[styles.card, cardElev]}>
+      <Pressable style={[styles.card, cardElev]} onPress={replayCharts}>
         <View style={styles.cardHeaderRow}>
           <Text style={[styles.cardTitle, { flex: 1 }]}>어떤 기분일 때 후회가 많았나요?</Text>
           <Pressable
-            onPress={() => setHelpId('moodRegret')}
+            onPress={(e) => openHelp('moodRegret', e)}
             hitSlop={8}
             style={styles.cardHelpBtn}
             accessibilityRole="button"
@@ -1005,39 +1069,59 @@ export default function InsightsScreen() {
           </Pressable>
         </View>
         {moodHeadline ? <Text style={[styles.moodHeadline, { marginTop: 6 }]}>{moodHeadline}</Text> : null}
-        {moodRows.map((m) => (
-          <Pressable
-            key={m.bucket}
-            onPress={() => void openMoodDetail(m.bucket)}
-            style={({ pressed }) => [styles.moodPressRow, { opacity: pressed ? 0.88 : 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel={`${m.label} 기분 상세 보기`}
-          >
+        {moodRows.map((m, i) => (
+          <View key={m.bucket} style={styles.moodPressRow}>
             <View style={styles.moodTop}>
               <Text style={styles.legendLabel} numberOfLines={1}>
                 {m.label}
               </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                <Text style={styles.legendPct}>
-                  {m.totalCount}건 · 후회 {m.regretRate.toFixed(0)}%
-                </Text>
-                <MaterialIcons name="chevron-right" size={18} color={colors.textMuted} />
-              </View>
+              <Text style={styles.legendPct}>
+                {m.totalCount}건 · 후회 {m.regretRate.toFixed(0)}%
+              </Text>
             </View>
             <View style={styles.moodBarTrack}>
-              <View
-                style={[
-                  styles.moodBarFill,
-                  {
-                    width: `${m.regretBarPct}%`,
-                    backgroundColor: regretBarColor(m.regretRate, colors),
-                  },
-                ]}
+              <AnimatedBarFill
+                pct={m.regretBarPct}
+                delay={i * 45}
+                replay={chartReplay}
+                style={[styles.moodBarFill, { backgroundColor: regretBarColor(m.regretRate, colors) }]}
               />
             </View>
-          </Pressable>
+          </View>
         ))}
-      </View>
+        <Pressable
+          onPress={() => {
+            router.push({
+              pathname: '/mood-insights',
+              params: {
+                mode: insightsWindow.mode,
+                year: String(insightsWindow.year),
+                monthIndex: insightsWindow.mode === 'month' ? String(insightsWindow.monthIndex) : '',
+                periodLabel: moodPeriodLabel,
+              },
+            });
+          }}
+          style={({ pressed }) => [
+            styles.moodSeeAllBtn,
+            {
+              borderColor: colors.border,
+              backgroundColor: colors.surfaceMuted,
+              opacity: pressed ? 0.9 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="기분별 후회 분석 자세히 보기"
+        >
+          <Text style={[styles.moodSeeAllText, { color: colors.text }]}>기분별 분석 보기</Text>
+          <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+        </Pressable>
+      </Pressable>
+
+      <WeekdayTimeRegretCard
+        weekdayInsights={insights.weekdayInsights}
+        timeOfDayInsights={insights.timeOfDayInsights}
+        onHelpPress={(e) => openHelp('timeWeekdayRegret', e)}
+      />
 
       <View style={[styles.card, cardElev]}>
         <Text style={styles.cardTitle}>요일별 소비 빈도</Text>
@@ -1074,24 +1158,22 @@ export default function InsightsScreen() {
           })}
 
         </View>
+        <View style={[styles.barLegendRow, { justifyContent: 'center', gap: 16 }]}>
+          {CAT_ORDER.map((c) => (
+            <View key={c} style={styles.barLegendItem}>
+              <View style={[styles.barLegendDot, { backgroundColor: CAT_COLORS[c] }]} />
+              <Text style={styles.barLegendText}>{CAT_LABELS[c]}</Text>
+            </View>
+          ))}
+        </View>
       </View>
     </ScrollView>
 
     <InsightHelpModal
       visible={helpId !== null}
       content={helpId ? getInsightHelpContent(helpId) : null}
+      origin={helpOrigin}
       onClose={() => setHelpId(null)}
-    />
-
-    <MoodInsightDetailModal
-      visible={moodDetailVisible}
-      loading={moodDetailLoading}
-      detail={moodDetail}
-      periodLabel={moodPeriodLabel}
-      onClose={() => {
-        setMoodDetailVisible(false);
-        setMoodDetail(null);
-      }}
     />
     </>
   );

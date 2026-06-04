@@ -23,6 +23,8 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateReviewReminderSettings: (enabled: boolean, reviewReminderTime: string) => Promise<void>;
+  updateRegretPatternAlertSettings: (enabled: boolean) => Promise<void>;
+  mergeAccountLocal: (patch: Partial<Account>) => void;
   updateReviewDelayDays: (reviewDelayDays: (1 | 3 | 7 | 30)[]) => Promise<void>;
   updateMonthlyIncome: (
     amount: number,
@@ -65,6 +67,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
               reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
               reviewReminderEnabled: true,
+              regretPatternAlertEnabled: true,
               reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
               monthlyIncomeAmount: 0,
               monthlyIncomeCurrency: 'KRW',
@@ -164,6 +167,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
+  const mergeAccountLocal = useCallback((patch: Partial<Account>) => {
+    setAccount((prev) => (prev ? { ...prev, ...patch } : null));
+  }, []);
+
+  const updateRegretPatternAlertSettings = useCallback(async (enabled: boolean) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const accountId = toAccountId(uid);
+    await authService.updateRegretPatternAlertSettings(accountId, enabled);
+    setAccount((prev) => (prev ? { ...prev, regretPatternAlertEnabled: enabled } : null));
+  }, []);
+
   const updateMonthlyIncome = useCallback(
     async (amount: number, currency: 'KRW' | 'USD', exchangeRateUsdToKrw: number) => {
       const uid = auth.currentUser?.uid;
@@ -243,6 +258,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn,
       logout,
       updateReviewReminderSettings,
+      updateRegretPatternAlertSettings,
+      mergeAccountLocal,
       updateReviewDelayDays,
       updateMonthlyIncome,
       updateFoodBudget,
@@ -261,6 +278,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn,
       logout,
       updateReviewReminderSettings,
+      updateRegretPatternAlertSettings,
+      mergeAccountLocal,
       updateReviewDelayDays,
       updateMonthlyIncome,
       updateFoodBudget,

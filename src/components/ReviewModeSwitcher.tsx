@@ -1,7 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import type { ThemeColors } from '@/theme/ThemeContext';
+import Animated, { FadeInUp } from 'react-native-reanimated';
+import { useTheme, type ThemeColors } from '@/theme/ThemeContext';
 
 export type ReviewListMode = 'pending' | 'past' | 'liked' | 'history';
 
@@ -38,6 +39,7 @@ export function ReviewModeSwitcher({
   historyCount?: number;
 }) {
   const [open, setOpen] = React.useState(false);
+  const { animationsEnabled } = useTheme();
   const active = MODES.find((m) => m.id === mode) ?? MODES[0];
 
   const badgeFor = (id: ReviewListMode): number | undefined => {
@@ -51,45 +53,51 @@ export function ReviewModeSwitcher({
     <View pointerEvents="box-none" style={[styles.wrap, { bottom, right }]}>
       {open ? (
         <View style={[styles.menu, { backgroundColor: colors.surface, borderColor: colors.border }, !isDark && styles.menuElev]}>
-          {MODES.map((item) => {
+          {MODES.map((item, i) => {
             const selected = item.id === mode;
             const badge = badgeFor(item.id);
+            // 추가 버튼(아래)에 가까운 항목부터 차례로 위로 솟아오르게
+            const delay = (MODES.length - 1 - i) * 45;
             return (
-              <Pressable
+              <Animated.View
                 key={item.id}
-                style={({ pressed }) => [
-                  styles.menuRow,
-                  selected && { backgroundColor: colors.choiceActiveBg },
-                  pressed && { opacity: 0.9 },
-                ]}
-                onPress={() => {
-                  onChange(item.id);
-                  setOpen(false);
-                }}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={item.label}
+                entering={animationsEnabled ? FadeInUp.delay(delay).springify().damping(14).mass(0.6) : undefined}
               >
-                <MaterialIcons
-                  name={item.icon}
-                  size={20}
-                  color={selected ? colors.accentBlue : colors.textSec}
-                />
-                <Text
-                  style={[
-                    styles.menuLabel,
-                    { color: selected ? colors.accentBlue : colors.text },
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.menuRow,
+                    selected && { backgroundColor: colors.choiceActiveBg },
+                    pressed && { opacity: 0.9 },
                   ]}
-                  numberOfLines={1}
+                  onPress={() => {
+                    onChange(item.id);
+                    setOpen(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={item.label}
                 >
-                  {item.label}
-                </Text>
-                {badge != null ? (
-                  <View style={[styles.badge, { backgroundColor: colors.accentBlue }]}>
-                    <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
-                  </View>
-                ) : null}
-              </Pressable>
+                  <MaterialIcons
+                    name={item.icon}
+                    size={20}
+                    color={selected ? colors.accentBlue : colors.textSec}
+                  />
+                  <Text
+                    style={[
+                      styles.menuLabel,
+                      { color: selected ? colors.accentBlue : colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.label}
+                  </Text>
+                  {badge != null ? (
+                    <View style={[styles.badge, { backgroundColor: colors.accentBlue }]}>
+                      <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              </Animated.View>
             );
           })}
         </View>

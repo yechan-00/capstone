@@ -15,6 +15,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
+import { useRefreshPendingReviewCountOnFocus, usePendingReviewCount } from '@/hooks/usePendingReviewCount';
 import { scheduleService } from '@/services/scheduleService';
 import { expenseService } from '@/services/expenseService';
 import { ensureReviewSchedulesForAccount } from '@/services/reviewScheduleBackfill';
@@ -490,6 +491,8 @@ export default function ReviewsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { account } = useAuth();
+  const { refresh: refreshPendingReviewCount } = usePendingReviewCount();
+  useRefreshPendingReviewCountOnFocus();
   const { colors, isDark } = useTheme();
   const [mode, setMode] = React.useState<ReviewListMode>('pending');
   const [pendingItems, setPendingItems] = React.useState<ReviewItem[]>([]);
@@ -638,6 +641,7 @@ export default function ReviewsScreen() {
           buildReviewItem(schedule, expenseById.get(schedule.expenseId), '마감'),
         ),
       );
+      void refreshPendingReviewCount();
     } catch (err) {
       console.error('[reviews] load failed', err);
       setError(err);

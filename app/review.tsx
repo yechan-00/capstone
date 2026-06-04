@@ -19,6 +19,7 @@ import { firstParam } from '@/utils/routerParams';
 import { Chip } from '@/components/Chip';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SatisfactionLevelPicker } from '@/components/SatisfactionLevelPicker';
+import { SuccessOverlay, type SuccessTone } from '@/components/SuccessOverlay';
 import { regretReasonsForReviewUi } from '@/lib/regretReasons';
 import { decisionAgainFromSatisfaction, needsRegretReasonsFlow } from '@/lib/reviewSatisfaction';
 import { reviewService } from '@/services/reviewService';
@@ -67,6 +68,9 @@ export default function ReviewScreen() {
   const [memo, setMemo] = useState('');
   const [saving, setSaving] = useState(false);
   const [skipping, setSkipping] = useState(false);
+  const [success, setSuccess] = useState<
+    null | { tone: SuccessTone; title: string; subtitle?: string; mode: 'auto' | 'tap' }
+  >(null);
 
   const canSubmit = rating >= 1;
   const showReasons = useMemo(() => needsRegretReasonsFlow(rating), [rating]);
@@ -133,10 +137,15 @@ export default function ReviewScreen() {
           '맛/양이 아쉬웠다면, 다음엔 소용량 또는 검증된 메뉴로 실험 폭을 줄여 보세요.',
         ];
         const tip = tips[Math.floor(Math.random() * tips.length)];
-        Alert.alert('학습 포인트', tip, [{ text: '확인', onPress: () => router.replace('/(tabs)') }]);
+        setSuccess({ tone: 'regret', title: '기록했어요', subtitle: tip, mode: 'tap' });
         return;
       }
-      router.replace('/(tabs)');
+      setSuccess({
+        tone: 'positive',
+        title: '기록 완료!',
+        subtitle: '잘 남겼어요. 패턴이 쌓이고 있어요.',
+        mode: 'auto',
+      });
     } catch (e) {
       console.error('[review] submit failed', e);
       Alert.alert('저장 실패', '리뷰를 저장하지 못했어요. 네트워크를 확인해 주세요.');
@@ -160,6 +169,7 @@ export default function ReviewScreen() {
             try {
               setSkipping(true);
               await scheduleService.markAsSkipped(scheduleId);
+              (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
               router.replace('/(tabs)');
             } catch (e) {
               console.error('[review] skip failed', e);
@@ -341,6 +351,19 @@ export default function ReviewScreen() {
           style={{ flex: 1, height: 52, borderRadius: 14 }}
         />
       </View>
+
+      <SuccessOverlay
+        visible={success !== null}
+        tone={success?.tone}
+        title={success?.title ?? ''}
+        subtitle={success?.subtitle}
+        mode={success?.mode}
+        onDone={() => {
+          setSuccess(null);
+          (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
+          router.replace('/(tabs)');
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }

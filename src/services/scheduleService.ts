@@ -74,13 +74,6 @@ export const scheduleService = {
     const expiresAt = computeReviewExpiresAt(spentAt);
     const notifyAt = computeReviewNotificationAt(spentAt, notificationTime);
 
-    let notificationId = '';
-    try {
-      notificationId = await this.scheduleNotification(expenseId, notifyAt);
-    } catch {
-      // 알림 실패 무시
-    }
-
     const schedule: Omit<ReviewSchedule, 'id' | 'createdAt'> = {
       expenseId,
       accountId,
@@ -90,25 +83,35 @@ export const scheduleService = {
       expiresAt,
       delayDays: 1,
       status: 'pending',
-      notificationId,
+      notificationId: '',
     };
 
-    await addDoc(collection(db, COLLECTION_NAME), {
+    const scheduleRef = await addDoc(collection(db, COLLECTION_NAME), {
       ...schedule,
       dueAt: Timestamp.fromDate(opensAt),
       expiresAt: Timestamp.fromDate(expiresAt),
       createdAt: serverTimestamp(),
     });
+
+    let notificationId = '';
+    try {
+      notificationId = await this.scheduleNotification(expenseId, notifyAt, scheduleRef.id);
+      if (notificationId) {
+        await updateDoc(scheduleRef, { notificationId });
+      }
+    } catch {
+      // 알림 실패 무시
+    }
   },
 
-  async scheduleNotification(expenseId: string, notifyAt: Date): Promise<string> {
+  async scheduleNotification(expenseId: string, notifyAt: Date, scheduleId: string): Promise<string> {
     try {
       const { title, body } = reviewNotificationCopy();
       const notificationId = await scheduleReviewReminder({
         title,
         body,
         dueAt: notifyAt,
-        data: { expenseId, scheduleType: 'd1' },
+        data: { kind: 'review_reminder', expenseId, scheduleId, scheduleType: 'd1' },
       });
       return notificationId;
     } catch (error) {

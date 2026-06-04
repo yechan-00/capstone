@@ -9,13 +9,14 @@ import {
   CategoryInsight,
   MoodInsight,
   TimeOfDayInsight,
+  WeekdayInsight,
   type Account,
   type FoodBudgetInsight,
   type IncomeInsight,
   type InsightsWindow,
 } from '@/lib/types';
 import { budgetPeriodForInsightsWindow } from '@/lib/budgetPeriod';
-import { normalizeExpenseMood } from '@/lib/expenseMood';
+import { normalizeExpenseMood, EXPENSE_MOOD_OPTIONS } from '@/lib/expenseMood';
 import { getTimeOfDay } from '@/utils/time';
 
 function buildIncomeInsight(
@@ -60,7 +61,7 @@ function buildFoodBudgetInsight(
   };
 }
 
-function boundsForInsightsWindow(w: InsightsWindow, account: Account | null): { start: Date; end: Date } {
+export function boundsForInsightsWindow(w: InsightsWindow, account: Account | null): { start: Date; end: Date } {
   if (w.mode === 'month' && account?.budgetPeriodMode === 'payday') {
     const period = budgetPeriodForInsightsWindow(w, account);
     return { start: period.start, end: period.end };
@@ -153,6 +154,12 @@ export const insightsService = {
       expenseMap
     );
 
+    const weekdayInsights = this.calculateWeekdayInsights(
+      periodExpenses,
+      regretReviews,
+      expenseMap
+    );
+
     const totalSpendKrw = periodExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
     const incomeInsight = buildIncomeInsight(totalSpendKrw, monthlyIncomeKrw, window);
     const foodBudgetInsight = buildFoodBudgetInsight(totalSpendKrw, foodBudgetKrw, window, account);
@@ -173,6 +180,7 @@ export const insightsService = {
         categoryInsights,
         moodInsights,
         timeOfDayInsights,
+        weekdayInsights,
         weekdayExpenseCounts,
         weekdayCategoryCounts,
         totalExpenses: periodExpenses.length,
@@ -237,63 +245,113 @@ export const insightsService = {
     expenses: Expense[],
     regretReviews: Review[],
     expenseMap: Map<string, Expense>
-  ) {
+  ): MoodInsight[] {
     const moodMap = new Map<ExpenseMood, { total: number; regrets: number }>();
+    for (const option of EXPENSE_MOOD_OPTIONS) {
+      moodMap.set(option.key, { total: 0, regrets: 0 });
+    }
 
     expenses.forEach((expense) => {
       const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
-      const current = moodMap.get(mood) || { total: 0, regrets: 0 };
+      if (!moodMap.has(mood)) return;
+      const current = moodMap.get(mood)!;
       moodMap.set(mood, { ...current, total: current.total + 1 });
     });
 
     regretReviews.forEach((review) => {
       const expense = expenseMap.get(review.expenseId);
-      if (expense) {
-        const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
-        const current = moodMap.get(mood) || { total: 0, regrets: 0 };
-        moodMap.set(mood, { ...current, regrets: current.regrets + 1 });
-      }
+      if (!expense) return;
+      const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
+      if (!moodMap.has(mood)) return;
+      const current = moodMap.get(mood)!;
+      moodMap.set(mood, { ...current, regrets: current.regrets + 1 });
     });
 
-    return Array.from(moodMap.entries()).map(([mood, data]) => ({
-      mood,
-      totalCount: data.total,
-      regretCount: data.regrets,
-      regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
-    }));
+    return EXPENSE_MOOD_OPTIONS.map((option) => {
+      const data = moodMap.get(option.key)!;
+      return {
+        mood: option.key,
+        totalCount: data.total,
+        regretCount: data.regrets,
+        regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
+      };
+    });
   },
 
   calculateTimeOfDayInsights(
     expenses: Expense[],
     regretReviews: Review[],
     expenseMap: Map<string, Expense>
-  ) {
+  ): TimeOfDayInsight[] {
+    const timeOrder = ['morning', 'afternoon', 'evening', 'night'] as const;
     const timeMap = new Map<
-      'morning' | 'afternoon' | 'evening' | 'night',
+      (typeof timeOrder)[number],
       { total: number; regrets: number }
     >();
+    for (const slot of timeOrder) {
+      timeMap.set(slot, { total: 0, regrets: 0 });
+    }
 
     expenses.forEach((expense) => {
       const timeOfDay = getTimeOfDay(expense.spentAt);
-      const current = timeMap.get(timeOfDay) || { total: 0, regrets: 0 };
+      if (!timeMap.has(timeOfDay)) return;
+      const current = timeMap.get(timeOfDay)!;
       timeMap.set(timeOfDay, { ...current, total: current.total + 1 });
     });
 
     regretReviews.forEach((review) => {
       const expense = expenseMap.get(review.expenseId);
-      if (expense) {
-        const timeOfDay = getTimeOfDay(expense.spentAt);
-        const current = timeMap.get(timeOfDay) || { total: 0, regrets: 0 };
-        timeMap.set(timeOfDay, { ...current, regrets: current.regrets + 1 });
-      }
+      if (!expense) return;
+      const timeOfDay = getTimeOfDay(expense.spentAt);
+      if (!timeMap.has(timeOfDay)) return;
+      const current = timeMap.get(timeOfDay)!;
+      timeMap.set(timeOfDay, { ...current, regrets: current.regrets + 1 });
     });
 
-    return Array.from(timeMap.entries()).map(([timeOfDay, data]) => ({
-      timeOfDay,
-      totalCount: data.total,
-      regretCount: data.regrets,
-      regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
-    }));
+    return timeOrder.map((timeOfDay) => {
+      const data = timeMap.get(timeOfDay)!;
+      return {
+        timeOfDay,
+        totalCount: data.total,
+        regretCount: data.regrets,
+        regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
+      };
+    });
+  },
+
+  calculateWeekdayInsights(
+    expenses: Expense[],
+    regretReviews: Review[],
+    expenseMap: Map<string, Expense>
+  ): WeekdayInsight[] {
+    const dayMap = new Map<number, { total: number; regrets: number }>();
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      dayMap.set(weekday, { total: 0, regrets: 0 });
+    }
+
+    expenses.forEach((expense) => {
+      const weekday = expense.spentAt.getDay();
+      const current = dayMap.get(weekday)!;
+      dayMap.set(weekday, { ...current, total: current.total + 1 });
+    });
+
+    regretReviews.forEach((review) => {
+      const expense = expenseMap.get(review.expenseId);
+      if (!expense) return;
+      const weekday = expense.spentAt.getDay();
+      const current = dayMap.get(weekday)!;
+      dayMap.set(weekday, { ...current, regrets: current.regrets + 1 });
+    });
+
+    return Array.from({ length: 7 }, (_, weekday) => {
+      const data = dayMap.get(weekday)!;
+      return {
+        weekday,
+        totalCount: data.total,
+        regretCount: data.regrets,
+        regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
+      };
+    });
   },
 
   generatePatterns(

@@ -1,6 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useTheme } from '@/theme/ThemeContext';
 
 export type DonutSlice = { key: string; color: string; pct: number };
@@ -58,10 +64,12 @@ type Props = {
   /** 가운데 짧은 라벨 (예: "3건") */
   centerLabel?: string;
   size?: number;
+  /** 값이 바뀔 때마다 다시 그려짐 (탭 재생용) */
+  replay?: number;
 };
 
-export function CategoryDonutChart({ slices, centerLabel, size = 176 }: Props) {
-  const { colors } = useTheme();
+export function CategoryDonutChart({ slices, centerLabel, size = 176, replay = 0 }: Props) {
+  const { colors, animationsEnabled } = useTheme();
 
   const paths = useMemo(() => {
     const valid = slices.filter((s) => s.pct > 0);
@@ -93,6 +101,25 @@ export function CategoryDonutChart({ slices, centerLabel, size = 176 }: Props) {
     return out;
   }, [slices]);
 
+  const sliceKey = paths.map((p) => `${p.key}:${p.d.length}`).join('|');
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    if (!animationsEnabled) {
+      progress.value = 1;
+      return;
+    }
+    progress.value = 0;
+    progress.value = withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) });
+  }, [sliceKey, animationsEnabled, replay, progress]);
+
+  const donutStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [
+      { scale: 0.7 + 0.3 * progress.value },
+      { rotate: `${(1 - progress.value) * -28}deg` },
+    ],
+  }));
+
   if (paths.length === 0) {
     return (
       <View style={[styles.wrap, { width: size, height: size }]}>
@@ -108,11 +135,13 @@ export function CategoryDonutChart({ slices, centerLabel, size = 176 }: Props) {
 
   return (
     <View style={[styles.wrap, { width: size, height: size }]}>
-      <Svg width={size} height={size} viewBox={`0 0 ${VB} ${VB}`}>
-        {paths.map((p) => (
-          <Path key={p.key} d={p.d} fill={p.color} stroke="none" />
-        ))}
-      </Svg>
+      <Animated.View style={donutStyle}>
+        <Svg width={size} height={size} viewBox={`0 0 ${VB} ${VB}`}>
+          {paths.map((p) => (
+            <Path key={p.key} d={p.d} fill={p.color} stroke="none" />
+          ))}
+        </Svg>
+      </Animated.View>
       {centerLabel ? (
         <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
           <View style={styles.centerBox}>

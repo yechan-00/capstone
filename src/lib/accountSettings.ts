@@ -41,6 +41,11 @@ export function resolveReviewReminderEnabled(account: Account | null): boolean {
   return account.reviewReminderEnabled !== false;
 }
 
+export function resolveRegretPatternAlertEnabled(account: Account | null): boolean {
+  if (!account) return true;
+  return account.regretPatternAlertEnabled !== false;
+}
+
 export function resolveReviewDelayDays(account: Account | null): (1 | 3 | 7 | 30)[] {
   const raw = account?.reviewDelayDays as unknown;
   if (Array.isArray(raw)) {

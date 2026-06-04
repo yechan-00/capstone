@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Insights, InsightsWindow } from '@/lib/types';
+import type { Account, Insights, InsightsWindow } from '@/lib/types';
 import { toMonthlyIncomeKrw } from '@/lib/accountSettings';
-import { toFoodBudgetKrw } from '@/lib/budgetPeriod';
+import { currentInsightsMonthWindow, toFoodBudgetKrw } from '@/lib/budgetPeriod';
 import { insightsService } from '@/services/insightsService';
 import { useAuth } from './useAuth';
 
-export function currentInsightsWindow(mode: 'month' | 'year' = 'month'): InsightsWindow {
+export function currentInsightsWindow(
+  mode: 'month' | 'year' = 'month',
+  account?: Account | null,
+): InsightsWindow {
   const now = new Date();
   if (mode === 'year') {
     return { mode: 'year', year: now.getFullYear() };
   }
-  return { mode: 'month', year: now.getFullYear(), monthIndex: now.getMonth() };
+  return currentInsightsMonthWindow(account);
 }
 
 export const useInsights = (window: InsightsWindow) => {

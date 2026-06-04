@@ -11,6 +11,16 @@ export interface Account {
   reviewReminderTime?: string;
   /** 리뷰 푸시 알림 사용 여부 (기본 true) */
   reviewReminderEnabled?: boolean;
+  /** 후회 패턴(요일·시간) 예방 알림 (기본 true) */
+  regretPatternAlertEnabled?: boolean;
+  /** 서버·로컬 알림 스케줄용 계산된 슬롯 */
+  regretPatternAlertSlots?: RegretPatternAlertSlot[];
+  regretPatternAlertSyncedAt?: Date;
+  /** Expo push (Cloud Functions 원격 알림용) */
+  expoPushToken?: string | null;
+  expoPushTokenUpdatedAt?: Date;
+  /** 알림 시간대 (IANA, 예: Asia/Seoul) */
+  notificationTimezone?: string;
   /**
    * 리뷰 알림 기준 일수(복수 선택).
    * 예: [1,3,7,30]. 비어있으면 기본 [3].
@@ -171,6 +181,31 @@ export interface TimeOfDayInsight {
   regretRate: number;
 }
 
+/** spentAt 기준 요일(0=일 … 6=토)별 후회 집계 */
+export interface WeekdayInsight {
+  weekday: number;
+  totalCount: number;
+  regretCount: number;
+  regretRate: number;
+}
+
+/** 후회 패턴 예방 알림 슬롯 (요일/시간) */
+export type RegretPatternAlertSlot = {
+  id: string;
+  kind: 'weekday' | 'time';
+  weekday?: number;
+  timeOfDay?: 'morning' | 'afternoon' | 'evening' | 'night';
+  hour: number;
+  minute: number;
+  label: string;
+  regretRate: number;
+  totalCount: number;
+  regretCount: number;
+  avgPurchaseHour?: number;
+  avgPurchaseMinute?: number;
+  leadMinutes?: number;
+};
+
 export type InsightsWindow =
   | { mode: 'month'; year: number; monthIndex: number }
   | { mode: 'year'; year: number };
@@ -208,6 +243,7 @@ export interface Insights {
   categoryInsights: CategoryInsight[];
   moodInsights: MoodInsight[];
   timeOfDayInsights: TimeOfDayInsight[];
+  weekdayInsights: WeekdayInsight[];
   /** spentAt 기준 요일별 소비 건수. 인덱스 0=일 … 6=토 (Date.getDay) */
   weekdayExpenseCounts: number[];
   /** spentAt 기준 요일별 카테고리 건수 (delivery/cafe/takeout). 인덱스 0=일 … 6=토 */
@@ -221,4 +257,44 @@ export interface Insights {
   /** 식비 예산 미설정 시 null */
   foodBudgetInsight: FoodBudgetInsight | null;
   patterns: string[];
+}
+
+/** 소비 공유 링크 (게스트가 토큰으로 열람) */
+export interface ExpenseShare {
+  token: string;
+  expenseId: string;
+  accountId: string;
+  createdByUserId: string;
+  active: boolean;
+  title: string;
+  subtitle: string;
+  amount?: number;
+  category: ExpenseCategory;
+  imageUrl: string | null;
+  spentAt: Date;
+  createdAt: Date;
+}
+
+/** 공유 링크에 게스트가 남긴 코멘트 */
+export interface GuestComment {
+  id: string;
+  guestName: string;
+  body: string;
+  imageUrl: string | null;
+  createdAt: Date;
+}
+
+/** 사용자에게 표시되는 알림 (공유 코멘트 등) */
+export interface UserNotification {
+  id: string;
+  userId: string;
+  type: 'share_comment';
+  shareToken: string;
+  expenseId: string | null;
+  shareTitle?: string;
+  shareSubtitle?: string;
+  guestName: string;
+  bodyPreview: string;
+  read: boolean;
+  createdAt: Date;
 }

@@ -26,9 +26,12 @@ import { Chip } from '@/components/Chip';
 import {
   DEFAULT_REVIEW_REMINDER_TIME,
   resolveReviewDelayDays,
+  resolveRegretPatternAlertEnabled,
   resolveReviewReminderEnabled,
   resolveReviewReminderTime,
 } from '@/lib/accountSettings';
+import { formatRegretPatternAlertSummary } from '@/lib/regretPatternAlert';
+import { disableRegretPatternAlerts } from '@/services/regretPatternAlertService';
 import AlarmTimeWheel from '@/components/AlarmTimeWheel';
 
 type IncomeUnit = 'base' | 'man' | 'baekman';
@@ -60,10 +63,11 @@ function parseReminderTimeToDate(time: string): Date {
 export default function SettingsScreen() {
   const router = useRouter();
   const isFocusedRef = useRef(false);
-  const { user, account, logout, updateReviewReminderSettings, updateReviewDelayDays, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
-  const { colors, isDark, setDarkMode, accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset } = useTheme();
+  const { user, account, logout, updateReviewReminderSettings, updateRegretPatternAlertSettings, updateReviewDelayDays, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
+  const { colors, isDark, setDarkMode, accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset, animationsEnabled, setAnimationsEnabled } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
+  const [regretPatternAlertEnabled, setRegretPatternAlertEnabled] = useState(true);
   const [reviewDelayDays, setReviewDelayDays] = useState<ReviewDelayDay[]>([3]);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [accentExpanded, setAccentExpanded] = useState(false);
@@ -100,12 +104,8 @@ export default function SettingsScreen() {
   const foodBudgetInitRef = useRef(false);
   const budgetPeriodInitRef = useRef(false);
   const reminderInitRef = useRef(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const regretPatternInitRef = useRef(false);
   const paydayInputRef = useRef<TextInput>(null);
-
-  const scrollToTop = () => {
-    scrollRef.current?.scrollTo({ y: 0, animated: true });
-  };
 
   useFocusEffect(
     React.useCallback(() => {
@@ -120,6 +120,7 @@ export default function SettingsScreen() {
     const t = resolveReviewReminderTime(account);
     setTimeValue(parseReminderTimeToDate(t));
     setReviewReminderEnabled(resolveReviewReminderEnabled(account));
+    setRegretPatternAlertEnabled(resolveRegretPatternAlertEnabled(account));
     setReviewDelayDays((prev) => {
       const next = normalizeDelayDays(resolveReviewDelayDays(account));
       if (prev.length === next.length && prev[0] === next[0]) {
@@ -127,7 +128,7 @@ export default function SettingsScreen() {
       }
       return next;
     });
-  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled, account?.reviewDelayDays]);
+  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled, account?.regretPatternAlertEnabled, account?.reviewDelayDays]);
 
   useEffect(() => {
     if (!account) return;
@@ -215,10 +216,25 @@ export default function SettingsScreen() {
       setSaving(true);
       await updateReviewReminderSettings(enabled, formatTimeValue(date));
       setNotificationSaved(true);
-      scrollToTop();
       setTimeout(() => setNotificationSaved(false), 2000);
     } catch {
       Alert.alert('리뷰 알림', '저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveRegretPatternAlert = async (enabled: boolean) => {
+    try {
+      setSaving(true);
+      await updateRegretPatternAlertSettings(enabled);
+      if (!enabled && account?.id) {
+        await disableRegretPatternAlerts(account.id);
+      }
+      setNotificationSaved(true);
+      setTimeout(() => setNotificationSaved(false), 2000);
+    } catch {
+      Alert.alert('후회 패턴 알림', '저장에 실패했습니다.');
     } finally {
       setSaving(false);
     }
@@ -233,7 +249,6 @@ export default function SettingsScreen() {
       setSaving(true);
       await updateReviewDelayDays(days);
       setNotificationSaved(true);
-      scrollToTop();
       setTimeout(() => setNotificationSaved(false), 2000);
     } catch {
       Alert.alert('리뷰 주기', '저장에 실패했습니다.');
@@ -263,7 +278,6 @@ export default function SettingsScreen() {
       setSavingIncome(true);
       await updateFoodBudget(parsed, foodBudgetCurrency);
       setIncomeSaved(true);
-      scrollToTop();
       setTimeout(() => setIncomeSaved(false), 2000);
     } catch {
       Alert.alert('식비 예산', '저장에 실패했습니다.');
@@ -290,7 +304,6 @@ export default function SettingsScreen() {
       setSavingIncome(true);
       await updateBudgetPeriodSettings(budgetPeriodMode, resolvedDay);
       setIncomeSaved(true);
-      scrollToTop();
       setTimeout(() => setIncomeSaved(false), 2000);
     } catch {
       Alert.alert('통계 기준', '저장에 실패했습니다.');
@@ -329,7 +342,6 @@ export default function SettingsScreen() {
       setSavingIncome(true);
       await updateMonthlyIncome(parsed, incomeCurrency, rate);
       setIncomeSaved(true);
-      scrollToTop();
       setTimeout(() => setIncomeSaved(false), 2000);
     } catch {
       Alert.alert('월 수입', '저장에 실패했습니다.');
@@ -381,6 +393,17 @@ export default function SettingsScreen() {
   useDebouncedEffect(() => {
     if (!isFocusedRef.current) return;
     if (!account?.id) return;
+    if (!regretPatternInitRef.current) {
+      regretPatternInitRef.current = true;
+      return;
+    }
+    if (regretPatternAlertEnabled === resolveRegretPatternAlertEnabled(account)) return;
+    void saveRegretPatternAlert(regretPatternAlertEnabled);
+  }, [regretPatternAlertEnabled, account?.id], 500);
+
+  useDebouncedEffect(() => {
+    if (!isFocusedRef.current) return;
+    if (!account?.id) return;
     if (!reminderInitRef.current) return;
     void saveReviewDelayDays(reviewDelayDays);
   }, [reviewDelayDays, account?.id], 500);
@@ -392,19 +415,34 @@ export default function SettingsScreen() {
           flex: 1,
           backgroundColor: colors.bg,
         },
+        scroll: {
+          flex: 1,
+        },
         content: {
           paddingHorizontal: 16,
           paddingTop: 10,
           paddingBottom: 32,
           gap: 20,
         },
-        saveHint: {
-          color: colors.textSec,
-          fontWeight: '700',
+        saveToast: {
+          position: 'absolute',
+          left: 16,
+          right: 16,
+          bottom: 16,
+          borderRadius: 12,
+          borderWidth: StyleSheet.hairlineWidth,
+          paddingVertical: 10,
+          paddingHorizontal: 14,
+          alignItems: 'center',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          elevation: 4,
+        },
+        saveToastText: {
           fontSize: 13,
-          marginBottom: -8,
-          minHeight: 18,
-          marginLeft: 4,
+          fontWeight: '800',
         },
         cardInset: {
           paddingHorizontal: 16,
@@ -704,18 +742,17 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const showSaveToast = savingIncome || saving || incomeSaved || notificationSaved;
+  const saveToastMessage = savingIncome || saving ? '저장 중...' : '저장됨';
+
   return (
+    <View style={styles.container}>
     <ScrollView
-      ref={scrollRef}
-      style={styles.container}
+      style={styles.scroll}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
     >
-        <Text style={styles.saveHint}>
-          {savingIncome || saving ? '저장 중...' : incomeSaved || notificationSaved ? '저장됨' : ''}
-        </Text>
-
         <SettingsCard title="계정">
           <SettingsRow
             icon="person-outline"
@@ -890,6 +927,29 @@ export default function SettingsScreen() {
               <MaterialIcons name="schedule" size={20} color={colors.textMuted} />
             </TouchableOpacity>
 
+          </View>
+          <SettingsRow
+            icon="schedule"
+            title="후회 패턴 알림"
+            subtitle="후회가 잦은 요일·시간에 미리 알려드려요"
+            showChevron={false}
+            rightElement={
+              <Switch
+                value={regretPatternAlertEnabled}
+                onValueChange={setRegretPatternAlertEnabled}
+                trackColor={{ false: colors.border, true: colors.accentCta }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.border}
+              />
+            }
+          />
+          <View style={[styles.cardInset, { opacity: regretPatternAlertEnabled ? 1 : 0.45 }]}>
+            <Text style={[styles.fieldHint, { color: colors.textMuted }]}>
+              {formatRegretPatternAlertSummary(account?.regretPatternAlertSlots ?? [])}
+            </Text>
+            <Text style={[styles.fieldHint, { color: colors.textMuted, marginTop: 4 }]}>
+              인사이트 데이터가 갱신되면 알림 일정이 자동으로 맞춰져요.
+            </Text>
           </View>
           {Platform.OS === 'android' && showTimePicker && reviewReminderEnabled && (
             <DateTimePicker
@@ -1089,6 +1149,21 @@ export default function SettingsScreen() {
                 ios_backgroundColor={colors.border}
               />
             }
+          />
+          <SettingsRow
+            icon="auto-awesome"
+            title="동작 애니메이션"
+            subtitle="버튼·차트 등의 움직이는 효과를 켜고 끕니다"
+            showChevron={false}
+            rightElement={
+              <Switch
+                value={animationsEnabled}
+                onValueChange={setAnimationsEnabled}
+                trackColor={{ false: colors.border, true: colors.accentCta }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.border}
+              />
+            }
             last
           />
         </SettingsCard>
@@ -1114,5 +1189,12 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>로그아웃</Text>
         </TouchableOpacity>
     </ScrollView>
+
+    {showSaveToast ? (
+      <View style={[styles.saveToast, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.saveToastText, { color: colors.textSec }]}>{saveToastMessage}</Text>
+      </View>
+    ) : null}
+    </View>
   );
 }

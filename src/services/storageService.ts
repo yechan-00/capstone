@@ -19,6 +19,23 @@ export async function uploadExpenseImage(
   return getDownloadURL(storageRef);
 }
 
+/**
+ * 게스트 코멘트용 이미지 업로드. 경로: shares/{token}/comments/{commentId}
+ */
+export async function uploadGuestCommentImage(
+  token: string,
+  commentId: string,
+  localUri: string
+): Promise<string> {
+  const res = await fetch(localUri);
+  const blob = await res.blob();
+  const ext = guessExtFromUri(localUri);
+  const path = `shares/${token}/comments/${commentId}.${ext}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
 function guessExtFromUri(uri: string): string {
   const lower = uri.toLowerCase();
   if (lower.includes('.png')) return 'png';

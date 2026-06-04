@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '@/hooks/useAuth';
+import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 import { ThemeProvider, useTheme } from '@/theme/ThemeContext';
 import { useEffect, useState } from 'react';
 import { View, Image, StyleSheet, Dimensions } from 'react-native';
@@ -22,6 +23,22 @@ function SplashOverlay({ onDone }: { onDone: () => void }) {
   );
 }
 
+function AuthNavigationStack() {
+  useNotificationNavigation();
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="expense/[id]" />
+      <Stack.Screen name="add-expense" />
+      <Stack.Screen name="review" />
+      <Stack.Screen name="mood-insights" />
+      <Stack.Screen name="settings" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
+
 function ThemedNavigation() {
   const { isDark } = useTheme();
   const [ready, setReady] = useState(false);
@@ -34,14 +51,7 @@ function ThemedNavigation() {
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AuthProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="expense/[id]" />
-          <Stack.Screen name="add-expense" />
-          <Stack.Screen name="review" />
-          <Stack.Screen name="settings" options={{ headerShown: false }} />
-        </Stack>
+        <AuthNavigationStack />
       </AuthProvider>
     </>
   );

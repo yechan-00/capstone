@@ -1,4 +1,4 @@
-import type { Account } from '@/lib/types';
+import type { Account, InsightsWindow } from '@/lib/types';
 import { DEFAULT_EXCHANGE_USD_KRW } from '@/lib/accountSettings';
 
 export type BudgetPeriodMode = 'calendar' | 'payday';
@@ -107,6 +107,40 @@ export function currentBudgetPeriod(account: Account | null | undefined, now = n
 export function formatBudgetPeriodRange(start: Date, end: Date): string {
   const fmt = (d: Date) => `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
   return `${fmt(start)} ~ ${fmt(end)}`;
+}
+
+/** 월급날 주기 표시용 (연도 생략) */
+export function formatShortBudgetPeriodRange(start: Date, end: Date): string {
+  return `${start.getMonth() + 1}/${start.getDate()}~${end.getMonth() + 1}/${end.getDate()}`;
+}
+
+/** BudgetPeriodBounds → InsightsWindow (월 모드) */
+export function insightsWindowFromBudgetPeriod(period: BudgetPeriodBounds): InsightsWindow {
+  return {
+    mode: 'month',
+    year: period.start.getFullYear(),
+    monthIndex: period.start.getMonth(),
+  };
+}
+
+/** 오늘이 포함된 인사이트 월 윈도우 (월급날/달력 월 반영) */
+export function currentInsightsMonthWindow(account: Account | null | undefined): InsightsWindow {
+  return insightsWindowFromBudgetPeriod(currentBudgetPeriod(account));
+}
+
+/** 선택한 윈도우가 '현재 주기'인지 (월급날 설정 반영) */
+export function isCurrentInsightsWindow(
+  window: InsightsWindow,
+  account: Account | null | undefined,
+  now = new Date(),
+): boolean {
+  if (window.mode === 'year') {
+    return window.year === now.getFullYear();
+  }
+  if (window.mode !== 'month') return false;
+  const current = currentInsightsMonthWindow(account);
+  if (current.mode !== 'month') return false;
+  return window.year === current.year && window.monthIndex === current.monthIndex;
 }
 
 export function isPaydayCell(year: number, monthIndex: number, day: number, account: Account | null | undefined): boolean {

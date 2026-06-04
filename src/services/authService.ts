@@ -15,6 +15,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { toAccountId } from '@/lib/accountId';
 import { Account } from '@/lib/types';
+import type { RegretPatternAlertSlot } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
 import { timestampToDate } from '@/utils/firestore';
 
@@ -44,6 +45,7 @@ export const signUp = async (email: string, password: string): Promise<UserCrede
       notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
       reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
       reviewReminderEnabled: true,
+      regretPatternAlertEnabled: true,
       reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
       monthlyIncomeAmount: 0,
       monthlyIncomeCurrency: 'KRW',
@@ -121,6 +123,19 @@ export const getUserAccount = async (userId: string): Promise<Account | null> =>
       notificationTime: typeof data.notificationTime === 'string' ? data.notificationTime : undefined,
       reviewReminderTime,
       reviewReminderEnabled: data.reviewReminderEnabled !== false,
+      regretPatternAlertEnabled: data.regretPatternAlertEnabled !== false,
+      regretPatternAlertSlots: Array.isArray(data.regretPatternAlertSlots)
+        ? (data.regretPatternAlertSlots as RegretPatternAlertSlot[])
+        : undefined,
+      regretPatternAlertSyncedAt: data.regretPatternAlertSyncedAt
+        ? timestampToDate(data.regretPatternAlertSyncedAt)
+        : undefined,
+      expoPushToken: typeof data.expoPushToken === 'string' ? data.expoPushToken : null,
+      expoPushTokenUpdatedAt: data.expoPushTokenUpdatedAt
+        ? timestampToDate(data.expoPushTokenUpdatedAt)
+        : undefined,
+      notificationTimezone:
+        typeof data.notificationTimezone === 'string' ? data.notificationTimezone : undefined,
       reviewDelayDays:
         Array.isArray(data.reviewDelayDays)
           ? data.reviewDelayDays
@@ -327,4 +342,51 @@ export const changeAccountPassword = async (
     throw new Error('로그인 정보가 없습니다.');
   }
   await updatePassword(user, newPassword);
+};
+
+export const updateRegretPatternAlertSettings = async (
+  accountId: string,
+  regretPatternAlertEnabled: boolean,
+): Promise<void> => {
+  try {
+    await setDoc(
+      doc(db, 'accounts', accountId),
+      {
+        regretPatternAlertEnabled,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error('Failed to update regret pattern alert settings:', error);
+    throw new Error('후회 패턴 알림 설정을 저장하는데 실패했습니다.');
+  }
+};
+
+export const syncRegretPatternAlertState = async (
+  accountId: string,
+  payload: {
+    enabled: boolean;
+    slots: RegretPatternAlertSlot[];
+    timezone: string;
+    expoPushToken: string | null;
+  },
+): Promise<void> => {
+  try {
+    const data: Record<string, unknown> = {
+      regretPatternAlertEnabled: payload.enabled,
+      regretPatternAlertSlots: payload.slots,
+      regretPatternAlertSyncedAt: serverTimestamp(),
+      notificationTimezone: payload.timezone,
+      updatedAt: serverTimestamp(),
+    };
+    if (payload.expoPushToken) {
+      data.expoPushToken = payload.expoPushToken;
+      data.expoPushTokenUpdatedAt = serverTimestamp();
+    }
+    await setDoc(doc(db, 'accounts', accountId), data, { merge: true });
+  } catch (error) {
+    console.error('Failed to sync regret pattern alert state:', error);
+    throw new Error('후회 패턴 알림 정보를 저장하는데 실패했습니다.');
+  }
 };

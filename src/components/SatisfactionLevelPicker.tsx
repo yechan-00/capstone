@@ -1,6 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { SATISFACTION_LEVELS, type SatisfactionTone } from '@/lib/satisfactionScale';
+import { useTheme } from '@/theme/ThemeContext';
 
 function buildTonePalette(isDark: boolean): Record<
   SatisfactionTone,
@@ -59,6 +68,61 @@ function buildTonePalette(isDark: boolean): Record<
 const PALETTE_LIGHT = buildTonePalette(false);
 const PALETTE_DARK = buildTonePalette(true);
 
+function SatisfactionRow({
+  label,
+  selected,
+  palette,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  palette: { bg: string; bgSelected: string; border: string; borderSelected: string; text: string };
+  onPress: () => void;
+}) {
+  const { animationsEnabled } = useTheme();
+  const scale = useSharedValue(1);
+  const press = useSharedValue(1);
+
+  useEffect(() => {
+    if (selected && animationsEnabled) {
+      scale.value = withSequence(
+        withSpring(1.05, { damping: 8, stiffness: 220 }),
+        withSpring(1, { damping: 12, stiffness: 200 }),
+      );
+    }
+  }, [selected, animationsEnabled, scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value * press.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Pressable
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          onPress();
+        }}
+        onPressIn={() => {
+          if (animationsEnabled) press.value = withTiming(0.97, { duration: 90 });
+        }}
+        onPressOut={() => {
+          if (animationsEnabled) press.value = withSpring(1, { damping: 12, stiffness: 200 });
+        }}
+        style={[
+          styles.row,
+          {
+            backgroundColor: selected ? palette.bgSelected : palette.bg,
+            borderColor: selected ? palette.borderSelected : palette.border,
+          },
+        ]}
+      >
+        <Text style={[styles.label, { color: palette.text }]}>{label}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export function SatisfactionLevelPicker({
   value,
   onChange,
@@ -72,26 +136,15 @@ export function SatisfactionLevelPicker({
 
   return (
     <View style={styles.wrap}>
-      {SATISFACTION_LEVELS.map((row) => {
-        const selected = value === row.stars;
-        const c = palette[row.tone];
-        return (
-          <Pressable
-            key={row.stars}
-            onPress={() => onChange(row.stars)}
-            style={({ pressed }) => [
-              styles.row,
-              {
-                backgroundColor: selected ? c.bgSelected : c.bg,
-                borderColor: selected ? c.borderSelected : c.border,
-                opacity: pressed ? 0.92 : 1,
-              },
-            ]}
-          >
-            <Text style={[styles.label, { color: c.text }]}>{row.label}</Text>
-          </Pressable>
-        );
-      })}
+      {SATISFACTION_LEVELS.map((row) => (
+        <SatisfactionRow
+          key={row.stars}
+          label={row.label}
+          selected={value === row.stars}
+          palette={palette[row.tone]}
+          onPress={() => onChange(row.stars)}
+        />
+      ))}
     </View>
   );
 }

@@ -19,3 +19,7 @@ firestore-debug.log
 # Environment
 .env
 .env.local
+
+# Cloud-sync (iCloud/Dropbox) conflict duplicates: "file 2.json", "index 3.js" 등
+* [2-9]
+* [2-9].*

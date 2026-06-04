@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEY_DARK   = '@rw_dark_mode2';
 const STORAGE_KEY_ACCENT = '@rw_accent_color';
 const STORAGE_KEY_CUSTOM_PRESETS = '@rw_custom_presets';
+const STORAGE_KEY_ANIM = '@rw_animations_enabled';
 
 export type ThemeColors = {
   bg: string; surface: string; surfaceMuted: string;
@@ -125,6 +126,9 @@ type ThemeContextValue = {
   customPresets: AccentPreset[];
   addCustomPreset: (preset: AccentPreset) => void;
   removeCustomPreset: (key: string) => void;
+  /** 동작 애니메이션 on/off (기기 로컬 설정) */
+  animationsEnabled: boolean;
+  setAnimationsEnabled: (v: boolean) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -134,6 +138,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated]          = useState(false);
   const [accentKey, setAccentKeyState]   = useState('#1a2d4a');
   const [customPresets, setCustomPresets] = useState<AccentPreset[]>([NAVY_PRESET]);
+  const [animationsEnabled, setAnimationsEnabledState] = useState(true);
 
   // AsyncStorage 초기 로드
   useEffect(() => {
@@ -142,10 +147,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.getItem(STORAGE_KEY_DARK),
       AsyncStorage.getItem(STORAGE_KEY_ACCENT),
       AsyncStorage.getItem(STORAGE_KEY_CUSTOM_PRESETS),
-    ]).then(([darkVal, accentVal, presetsVal]) => {
+      AsyncStorage.getItem(STORAGE_KEY_ANIM),
+    ]).then(([darkVal, accentVal, presetsVal, animVal]) => {
       if (!mounted) return;
       setIsDarkState(darkVal === '1');
       if (accentVal) setAccentKeyState(accentVal);
+      // 기본값 true, 명시적으로 '0'일 때만 끔
+      setAnimationsEnabledState(animVal !== '0');
       if (presetsVal) {
         try {
           const parsed: AccentPreset[] = JSON.parse(presetsVal);
@@ -189,6 +197,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const setAnimationsEnabled = useCallback((value: boolean) => {
+    setAnimationsEnabledState(value);
+    AsyncStorage.setItem(STORAGE_KEY_ANIM, value ? '1' : '0').catch(() => {});
+  }, []);
+
   // ★ 다크모드면 무조건 darkBase 고정, 라이트모드만 accent 적용
   const colors = useMemo(() => {
     if (isDark) return darkBase;
@@ -203,8 +216,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     isDark, colors, setDarkMode, toggleDarkMode, hydrated,
     accentKey, setAccentKey,
     customPresets, addCustomPreset, removeCustomPreset,
+    animationsEnabled, setAnimationsEnabled,
   }), [isDark, colors, setDarkMode, toggleDarkMode, hydrated,
-       accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset]);
+       accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset,
+       animationsEnabled, setAnimationsEnabled]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

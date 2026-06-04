@@ -15,6 +15,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '@/theme/ThemeContext';
+import Animated, {
+  Easing,
+  ZoomIn,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import React, { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QuickPresetModal, type QuickPreset } from '@/components/QuickPresetModal';
@@ -22,26 +32,47 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/hooks/useAuth';
 import { useExpenses } from '@/hooks/useExpenses';
+import { PendingReviewCountProvider, usePendingReviewCount } from '@/hooks/usePendingReviewCount';
 import { MOODS, REASON_GROUPS } from '@/lib/expenseOptions';
 import { buildManualExpensePayload } from '@/services/expenseInput/manualExpensePayload';
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// 말풍선 꼬리 높이 (이 높이만큼 추가 버튼 위로 띄움)
+const SHEET_TAIL_H = 14;
+
 // ── FAB ───────────────────────────────────────────────────
 function AddTabButton({
-  onPress, onLongPress, fabColor, labelColor,
-}: { onPress: () => void; onLongPress: () => void; fabColor: string; labelColor: string }) {
+  onPress, onLongPress, fabColor, labelColor, animationsEnabled,
+}: { onPress: () => void; onLongPress: () => void; fabColor: string; labelColor: string; animationsEnabled: boolean }) {
+  const scale = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
   return (
     <Pressable
       style={styles.addTabButton}
+      onPressIn={() => {
+        if (animationsEnabled) scale.value = withTiming(0.88, { duration: 130 });
+      }}
+      onPressOut={() => {
+        if (animationsEnabled) scale.value = withSpring(1, { damping: 9, stiffness: 200 });
+      }}
       onPress={onPress}
       onLongPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        if (animationsEnabled) {
+          scale.value = withSequence(
+            withSpring(1.18, { damping: 7, stiffness: 220 }),
+            withSpring(1, { damping: 11, stiffness: 200 }),
+          );
+        }
         onLongPress();
       }}
       delayLongPress={400}
     >
-      <View style={[styles.addTabInner, { backgroundColor: fabColor }]}>
+      <Animated.View style={[styles.addTabInner, { backgroundColor: fabColor }, animatedStyle]}>
         <MaterialIcons name="add" size={32} color="#fff" />
-      </View>
+      </Animated.View>
       <Text style={[styles.addTabLabel, { color: labelColor }]}>추가</Text>
     </Pressable>
   );
@@ -71,6 +102,7 @@ function QuickInputSheet({
   colors, width, onSaved, account, createExpense,
 }: any) {
   const insets = useSafeAreaInsets();
+  const { animationsEnabled } = useTheme();
 
   const [selectedPreset, setSelectedPreset] = useState<QuickPreset | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
@@ -83,8 +115,44 @@ function QuickInputSheet({
   const [editingPreset, setEditingPreset] = useState<QuickPreset | null>(null);
 
   // 시트 닫힐 때 초기화
+  // 퇴장 애니메이션을 위해 visible과 별개로 렌더 유지 플래그를 둔다.
+  const [render, setRender] = useState(visible);
+
+  // 등장: 추가 버튼에서 솟아남 / 퇴장: 꼬리쪽으로 줄어들며 추가 버튼으로 빨려 들어감
+  const sheetOpen = useSharedValue(visible ? 1 : 0);
+  const backdropOpacity = useSharedValue(visible ? 1 : 0);
+
   useEffect(() => {
-    if (!visible) {
+    if (visible) {
+      setRender(true);
+      if (!animationsEnabled) {
+        sheetOpen.value = 1;
+        backdropOpacity.value = 1;
+        return;
+      }
+      sheetOpen.value = 0;
+      backdropOpacity.value = 0;
+      backdropOpacity.value = withTiming(1, { duration: 220 });
+      sheetOpen.value = withSpring(1, { damping: 15, stiffness: 180, mass: 0.7 });
+    } else {
+      if (!animationsEnabled) {
+        setRender(false);
+        return;
+      }
+      backdropOpacity.value = withTiming(0, { duration: 200 });
+      sheetOpen.value = withTiming(
+        0,
+        { duration: 230, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) runOnJS(setRender)(false);
+        },
+      );
+    }
+  }, [visible, animationsEnabled, sheetOpen, backdropOpacity]);
+
+  // 완전히 닫힌 뒤 입력값 초기화 (퇴장 애니메이션 중에는 유지)
+  useEffect(() => {
+    if (!render) {
       setSelectedPreset(null);
       setReasons([]);
       setMood(null);
@@ -94,10 +162,23 @@ function QuickInputSheet({
       setPresetModalVisible(false);
       setEditingPreset(null);
     }
-  }, [visible]);
+  }, [render]);
 
-  if (!visible) return null;
+  const sheetAnim = useAnimatedStyle(() => ({
+    opacity: sheetOpen.value,
+    transform: [
+      { scale: 0.3 + 0.7 * sheetOpen.value },
+      { translateY: (1 - sheetOpen.value) * 30 },
+    ],
+  }));
 
+  const backdropAnim = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
+
+  if (!render) return null;
+
+  // 탭바(하단 메뉴) 높이만큼만 띄워서, 시트 위로 흰 띠가 생기지 않게 한다.
+  // (tabBarStyle.height === 76 이 탭바 총 높이)
+  const tabBarGap = 76;
   const btnSize = Math.floor((width - 32 - 40) / 5);
 
   const handleSave = async () => {
@@ -126,13 +207,22 @@ function QuickInputSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={render} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.sheetRoot}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={() => { setQuickEditMode(null); setSelectedPreset(null); onClose(); }} />
-      <View style={[
+        {/* 딤 배경 — 탭바 위에서 멈춰 하단 메뉴가 보이게, 부드럽게 페이드 */}
+        <AnimatedPressable
+          style={[styles.sheetBackdrop, { bottom: tabBarGap }, backdropAnim]}
+          onPress={() => onClose()}
+        />
+      <Animated.View style={[
         styles.sheet,
-        { backgroundColor: colors.surface, paddingBottom: insets.bottom + 16 },
+        sheetAnim,
+        { backgroundColor: colors.surface, paddingBottom: 16, marginBottom: tabBarGap + SHEET_TAIL_H },
       ]}>
+        {/* 말풍선 꼬리 — 추가 버튼 정중앙으로 향함 */}
+        <View style={styles.sheetTailWrap} pointerEvents="none">
+          <View style={[styles.sheetTail, { borderTopColor: colors.surface }]} />
+        </View>
         {/* 핸들 */}
         <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
 
@@ -324,9 +414,16 @@ function QuickInputSheet({
               </Pressable>
             ) : (
               <View style={styles.quickPresetGrid}>
-                {quickPresets.map((preset: QuickPreset) => (
-                  <Pressable
+                {quickPresets.map((preset: QuickPreset, index: number) => (
+                  <Animated.View
                     key={preset.id}
+                    entering={
+                      animationsEnabled
+                        ? ZoomIn.delay(index * 45).springify().damping(12).mass(0.6)
+                        : undefined
+                    }
+                  >
+                  <Pressable
                     style={({ pressed }: any) => [
                       styles.quickPresetBtn,
                       { width: btnSize, height: btnSize, borderRadius: btnSize / 2 },
@@ -371,12 +468,13 @@ function QuickInputSheet({
                       {preset.label}
                     </Text>
                   </Pressable>
+                  </Animated.View>
                 ))}
               </View>
             )}
           </>
         )}
-      </View>
+      </Animated.View>
       </View>
 
       <QuickPresetModal
@@ -394,17 +492,20 @@ function QuickInputSheet({
 }
 
 // ── 메인 레이아웃 ─────────────────────────────────────────
-export default function TabsLayout() {
+function TabsNavigator() {
   const router = useRouter();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, animationsEnabled } = useTheme();
   const { width } = useWindowDimensions();
   const headerTitleColor = isDark ? colors.headerTint : colors.onPrimary;
+  const { count: pendingReviewCount } = usePendingReviewCount();
 
   const { account } = useAuth();
   const { createExpense } = useExpenses();
   const [showQuickSheet, setShowQuickSheet] = useState(false);
   const [quickPresets, setQuickPresets] = useState<QuickPreset[]>([]);
 
+  const reviewTabBadge =
+    pendingReviewCount > 0 ? (pendingReviewCount > 99 ? '99+' : pendingReviewCount) : undefined;
 
   useEffect(() => {
     AsyncStorage.getItem('@rw_quick_presets').then((val) => {
@@ -446,6 +547,7 @@ export default function TabsLayout() {
             borderTopWidth: StyleSheet.hairlineWidth,
           },
           tabBarLabelStyle: styles.tabLabel,
+          tabBarBadgeStyle: styles.tabBadge,
           headerStyle: { backgroundColor: 'transparent' },
           headerBackground: () => (
             <TabHeaderBackground
@@ -461,7 +563,14 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen name="index" options={{ title: '후회가계부', tabBarLabel: '홈', tabBarIcon: ({ color, size }) => <MaterialIcons name="home" size={size} color={color} /> }} />
-        <Tabs.Screen name="reviews" options={{ title: '리뷰', tabBarIcon: ({ color, size }) => <MaterialIcons name="checklist" size={size} color={color} /> }} />
+        <Tabs.Screen
+          name="reviews"
+          options={{
+            title: '리뷰',
+            tabBarBadge: reviewTabBadge,
+            tabBarIcon: ({ color, size }) => <MaterialIcons name="checklist" size={size} color={color} />,
+          }}
+        />
         <Tabs.Screen
           name="add"
           options={{
@@ -472,6 +581,7 @@ export default function TabsLayout() {
                 onLongPress={() => { setShowQuickSheet(true); }}
                 fabColor={colors.accentCta}
                 labelColor={colors.addTabLabel}
+                animationsEnabled={animationsEnabled}
               />
             ),
           }}
@@ -488,7 +598,10 @@ export default function TabsLayout() {
         handleAddPreset={handleAddPreset}
         colors={colors}
         width={width}
-        onSaved={() => { (globalThis as any).__reloadHomeExpenses?.(); }}
+        onSaved={() => {
+          (globalThis as { __reloadHomeExpenses?: () => void }).__reloadHomeExpenses?.();
+          (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
+        }}
         account={account}
         createExpense={createExpense}
       />
@@ -496,8 +609,25 @@ export default function TabsLayout() {
   );
 }
 
+export default function TabsLayout() {
+  return (
+    <PendingReviewCountProvider>
+      <TabsNavigator />
+    </PendingReviewCountProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   tabLabel: { fontSize: 11, fontWeight: '700' },
+  tabBadge: {
+    backgroundColor: '#ef4444',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    minWidth: 18,
+    height: 18,
+    lineHeight: 18,
+  },
   addTabButton: { alignItems: 'center', justifyContent: 'center' },
   addTabInner: {
     width: 56, height: 56, borderRadius: 28,
@@ -507,12 +637,36 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22, shadowRadius: 10, elevation: 8,
   },
   addTabLabel: { marginTop: 2, fontSize: 11, fontWeight: '700' },
-  sheetRoot: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  sheetBackdrop: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   sheet: {
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    borderBottomLeftRadius: 22, borderBottomRightRadius: 22,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16, paddingTop: 12, gap: 6,
-    maxHeight: '75%',
+    marginHorizontal: 0,
+    maxHeight: '72%',
+    transformOrigin: 'bottom',
+  },
+  sheetTailWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -SHEET_TAIL_H + 1,
+    alignItems: 'center',
+  },
+  sheetTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 14,
+    borderRightWidth: 14,
+    borderTopWidth: SHEET_TAIL_H,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
   },
   sheetHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 4 },
   quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
