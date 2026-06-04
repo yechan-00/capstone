@@ -1,0 +1,192 @@
+rules_version = '2';
+// Storage 규칙 초안은 프로젝트 루트 storage.rules 참고 (이미지 업로드 경로 users/{uid}/expenses/…).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function: 계정 소유자 확인
+    function isAccountOwner(accountId) {
+      return request.auth != null && accountId == 'account_' + request.auth.uid;
+    }
+    
+    // Helper function: 계정 멤버 확인 (확장용)
+    function isAccountMember(accountId) {
+      return request.auth != null && (
+        isAccountOwner(accountId) ||
+        exists(/databases/$(database)/documents/accounts/$(accountId)/members/$(request.auth.uid))
+      );
+    }
+    
+    // Helper function: 문서 생성 시 userId 검증
+    function isValidUserId(userId) {
+      return request.auth != null && userId == request.auth.uid;
+    }
+    
+    // Accounts 컬렉션
+    match /accounts/{accountId} {
+      // 읽기: 본인 계정만
+      allow read: if isAccountOwner(accountId);
+      
+      // 생성: 본인 userId로만 생성 가능
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.id == accountId;
+      
+      // 수정: 본인 계정만 (userId 필드 없는 partial update도 허용)
+      allow update: if isAccountOwner(accountId) &&
+                      (
+                        !('userId' in request.resource.data) ||
+                        request.resource.data.userId == resource.data.userId
+                      );
+      
+      // 삭제: 본인 계정만 (실제로는 거의 사용 안 함)
+      allow delete: if isAccountOwner(accountId);
+      
+      // Members 서브컬렉션
+      match /members/{userId} {
+        allow read: if isAccountMember(accountId);
+        allow create: if isAccountOwner(accountId) &&
+                          request.resource.data.userId == userId &&
+                          request.resource.data.accountId == accountId;
+        allow update: if isAccountOwner(accountId);
+        allow delete: if isAccountOwner(accountId);
+      }
+      
+      // Expenses 서브컬렉션
+      match /expenses/{expenseId} {
+        allow read: if isAccountMember(accountId);
+        
+        allow create: if isAccountMember(accountId) &&
+                         request.resource.data.accountId == accountId &&
+                         request.resource.data.id == expenseId;
+        
+        allow update: if isAccountMember(accountId) &&
+                         request.resource.data.accountId == resource.data.accountId;
+        
+        allow delete: if isAccountMember(accountId);
+        
+        // Reviews 서브컬렉션
+        match /reviews/{reviewId} {
+          allow read: if isAccountMember(accountId);
+          
+          allow create: if isAccountMember(accountId) &&
+                           request.resource.data.accountId == accountId &&
+                           request.resource.data.expenseId == expenseId &&
+                           request.resource.data.reviewerUserId == request.auth.uid &&
+                           request.resource.data.id == reviewId;
+          
+          allow update: if isAccountMember(accountId) &&
+                           request.resource.data.reviewerUserId == resource.data.reviewerUserId;
+          
+          allow delete: if isAccountMember(accountId) &&
+                           resource.data.reviewerUserId == request.auth.uid;
+        }
+      }
+      
+      // Review Schedules 서브컬렉션
+      match /review_schedules/{scheduleId} {
+        allow read: if isAccountMember(accountId);
+        
+        allow create: if isAccountMember(accountId) &&
+                         request.resource.data.accountId == accountId &&
+                         request.resource.data.id == scheduleId;
+        
+        allow update: if isAccountMember(accountId) &&
+                         request.resource.data.accountId == resource.data.accountId;
+        
+        allow delete: if isAccountMember(accountId);
+      }
+    }
+
+    // 최상위 Expenses 컬렉션 (현재 앱 구조에 맞춤)
+    match /expenses/{expenseId} {
+      allow read: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
+
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.accountId == 'account_' + request.auth.uid;
+
+      allow update: if request.auth != null &&
+        resource.data.accountId == 'account_' + request.auth.uid &&
+        request.resource.data.accountId == resource.data.accountId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        ) &&
+        (
+          !('userId' in request.resource.data) ||
+          request.resource.data.userId == request.auth.uid
+        );
+
+      allow delete: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
+    }
+
+    // 최상위 Reviews 컬렉션
+    match /reviews/{reviewId} {
+      allow read: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid ||
+          resource.data.reviewerUserId == request.auth.uid
+        );
+
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.accountId == 'account_' + request.auth.uid &&
+        request.resource.data.reviewerUserId == request.auth.uid;
+
+      allow update: if request.auth != null &&
+        resource.data.accountId == 'account_' + request.auth.uid &&
+        request.resource.data.reviewerUserId == resource.data.reviewerUserId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        );
+
+      allow delete: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
+    }
+
+    // 최상위 Review Schedules 컬렉션
+    match /review_schedules/{scheduleId} {
+      allow read: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
+
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.accountId == 'account_' + request.auth.uid;
+
+      allow update: if request.auth != null &&
+        resource.data.accountId == 'account_' + request.auth.uid &&
+        request.resource.data.accountId == resource.data.accountId &&
+        (
+          !('userId' in resource.data) ||
+          resource.data.userId == request.auth.uid
+        ) &&
+        (
+          !('userId' in request.resource.data) ||
+          request.resource.data.userId == request.auth.uid
+        );
+
+      allow delete: if request.auth != null &&
+        (
+          resource.data.userId == request.auth.uid ||
+          resource.data.accountId == 'account_' + request.auth.uid
+        );
+    }
+  }
+}
