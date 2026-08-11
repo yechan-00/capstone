@@ -23,11 +23,8 @@ function buildWebStyles() {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
       'Noto Sans KR', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
   }
-  #root {
-    display: flex;
-    flex: 1;
-    width: 100%;
-    min-height: 100%;
+  html, body, #root, .notranslate, [translate="no"] {
+    translate: no !important;
   }
   @font-face {
     font-family: "material";
@@ -46,7 +43,7 @@ function buildOgBlock() {
 <meta property="og:type" content="website" />
 <meta property="og:locale" content="ko_KR" />
 <meta property="og:site_name" content="후회가계부" />
-<meta property="og:title" content="후회가계부 · RegretWallet" />
+<meta property="og:title" content="후회가계부" />
 <meta property="og:description" content="${invite}" />
 <meta property="og:image" content="${baseUrl}/og-brand.png" />
 <meta property="og:url" content="${baseUrl}" />
@@ -77,7 +74,7 @@ function patchJsBundle() {
 
 let html = fs.readFileSync(htmlPath, 'utf8');
 
-html = html.replace('<html lang="en">', '<html lang="ko">');
+html = html.replace('<html lang="en">', '<html lang="ko" translate="no" class="notranslate">');
 html = html.replace(/<style id="regret-wallet-web">[\s\S]*?<\/style>\s*/g, '');
 html = html.replace(/<link rel="preload" href="[^"]*MaterialIcons[^"]*"[^>]*>\s*/g, '');
 html = html.replace('</head>', `${buildWebStyles()}</head>`);

@@ -1,10 +1,14 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { Platform } from 'react-native';
 import { AuthProvider } from '@/hooks/useAuth';
+import { AuthGate } from '@/components/AuthGate';
 import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 import { ThemeProvider, useTheme } from '@/theme/ThemeContext';
 import { useEffect, useState } from 'react';
-import { View, Image, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { BrandLogo } from '@/components/BrandLogo';
+import { AUTH } from '@/components/auth/authTheme';
 
 function SplashOverlay({ onDone }: { onDone: () => void }) {
   useEffect(() => {
@@ -14,11 +18,7 @@ function SplashOverlay({ onDone }: { onDone: () => void }) {
 
   return (
     <View style={styles.splash}>
-      <Image
-        source={require('../assets/images/logo.png')}
-        style={styles.logo}
-        resizeMode="contain"
-      />
+      <BrandLogo iconSize={96} labelSize={28} layout="column" tone="auth" />
     </View>
   );
 }
@@ -28,6 +28,9 @@ function AuthNavigationStack() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="home" />
+      <Stack.Screen name="community" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="expense/[id]" />
@@ -41,7 +44,8 @@ function AuthNavigationStack() {
 
 function ThemedNavigation() {
   const { isDark } = useTheme();
-  const [ready, setReady] = useState(false);
+  const skipSplash = Platform.OS === 'web';
+  const [ready, setReady] = useState(skipSplash);
 
   if (!ready) {
     return <SplashOverlay onDone={() => setReady(true)} />;
@@ -51,7 +55,9 @@ function ThemedNavigation() {
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AuthProvider>
-        <AuthNavigationStack />
+        <AuthGate>
+          <AuthNavigationStack />
+        </AuthGate>
       </AuthProvider>
     </>
   );
@@ -68,12 +74,8 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: '#F5F7FB',
+    backgroundColor: AUTH.background,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  logo: {
-    width: Dimensions.get('window').width * 0.65,
-    height: Dimensions.get('window').width * 0.65,
   },
 });
