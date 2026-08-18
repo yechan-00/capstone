@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": " ",
+    "name": "후회가계부",
     "slug": "regret-wallet",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo.png",
+    "icon": "./assets/images/app-logo.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/images/splash.png",
+      "image": "./assets/images/app-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F5F7FB"
+      "backgroundColor": "#FAFCF7"
     },
     "assetBundlePatterns": ["assets/**/*"],
     "ios": {
@@ -18,13 +18,13 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
-        "backgroundColor": "#F5F7FB"
+        "foregroundImage": "./assets/images/app-logo.png",
+        "backgroundColor": "#C9847A"
       },
       "package": "com.regretwallet.app"
     },
     "web": {
-      "favicon": "./assets/images/logo.png"
+      "favicon": "./assets/images/app-logo.png"
     },
     "plugins": [
       [

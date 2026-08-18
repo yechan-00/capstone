@@ -216,7 +216,7 @@ function buildShareHtml({ token, webBase, shareInvite, share, comments, og }) {
         : '<div class="comments" id="comments"></div>'
     }
 
-    <div class="footer">RegretWallet · 후회가계부</div>
+    <div class="footer">© 후회가계부</div>
   </div>
 
   <script src="https://www.gstatic.com/firebasejs/11.6.0/firebase-app-compat.js"><\/script>
