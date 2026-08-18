@@ -1,187 +1,200 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView,
-  Platform, ScrollView, Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { showAlert } from '@/utils/alert';
+import { LoginCard } from '@/components/auth/LoginCard';
+import { AuthScreenBackground } from '@/components/auth/AuthScreenBackground';
+import { AUTH } from '@/components/auth/authTheme';
+import { ForgotPasswordModal } from '@/components/auth/ForgotPasswordModal';
+import { CenterNoticeModal } from '@/components/CenterNoticeModal';
 import { validateEmail, validatePassword } from '@/utils/validation';
-import { mapFirebaseAuthError } from '@/utils/firebaseAuthErrors';
-
-const NAVY = '#1B2D5B';
+import { mapLoginAuthError, mapPasswordResetError } from '@/utils/firebaseAuthErrors';
+import * as authService from '@/services/authService';
 
 export default function LoginScreen() {
   const router = useRouter();
   const { signIn, signInAsGuest } = useAuth();
-  const [guestLoading, setGuestLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
+  const [resetSending, setResetSending] = useState(false);
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [notice, setNotice] = useState<{ title?: string; message: string } | null>(null);
+  const [backHovered, setBackHovered] = useState(false);
+  const isWeb = Platform.OS === 'web';
 
-  const handleLogin = async () => {
+  const showNotice = useCallback((message: string, title?: string) => {
+    setNotice({ message, title });
+  }, []);
+
+  const handleLogin = useCallback(async () => {
+    if (loading || guestLoading) return;
     if (!email.trim() || !password.trim()) {
-      showAlert('오류', '이메일과 비밀번호를 입력해주세요.'); return;
+      showNotice('이메일과 비밀번호를 입력해주세요.', '오류');
+      return;
     }
     if (!validateEmail(email)) {
-      showAlert('오류', '올바른 이메일 형식이 아닙니다.'); return;
+      showNotice('올바른 이메일 형식이 아닙니다.', '오류');
+      return;
     }
     const pv = validatePassword(password);
-    if (!pv.valid) { showAlert('오류', pv.message); return; }
+    if (!pv.valid) {
+      showNotice(pv.message ?? '비밀번호를 확인해주세요.', '오류');
+      return;
+    }
     try {
       setLoading(true);
       await signIn(email, password);
       router.replace('/(tabs)');
-    } catch (error: any) {
-      showAlert('로그인 실패', mapFirebaseAuthError(error, '로그인에 실패했습니다.'));
+    } catch (error: unknown) {
+      showNotice(mapLoginAuthError(error, '로그인에 실패했습니다.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, guestLoading, loading, password, router, showNotice, signIn]);
 
-  const handleGuestLogin = async () => {
+  const handleGuestLogin = useCallback(async () => {
+    if (loading || guestLoading) return;
     try {
       setGuestLoading(true);
       await signInAsGuest();
       router.replace('/(tabs)');
-    } catch (error: any) {
-      showAlert('오류', error.message || '게스트 로그인에 실패했습니다.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '게스트 로그인에 실패했습니다.';
+      showNotice(message, '오류');
     } finally {
       setGuestLoading(false);
     }
-  };
+  }, [guestLoading, loading, router, showNotice, signInAsGuest]);
+
+  const handlePasswordReset = useCallback(
+    async (resetEmail: string) => {
+      if (!validateEmail(resetEmail)) {
+        showNotice('올바른 이메일 형식이 아닙니다.', '오류');
+        return;
+      }
+      try {
+        setResetSending(true);
+        await authService.sendPasswordReset(resetEmail);
+        setForgotVisible(false);
+        showNotice('비밀번호 재설정 메일을 보냈습니다. 받은편지함을 확인해주세요.', '안내');
+      } catch (error: unknown) {
+        showNotice(mapPasswordResetError(error), '오류');
+      } finally {
+        setResetSending(false);
+      }
+    },
+    [showNotice],
+  );
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.content}>
+    <AuthScreenBackground>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        {isWeb ? (
+          <Pressable
+            onPress={() => router.push('/home')}
+            onHoverIn={() => setBackHovered(true)}
+            onHoverOut={() => setBackHovered(false)}
+            style={({ pressed }) => [
+              styles.backLink,
+              pressed && { opacity: 0.75 },
+            ]}
+          >
+            <Text style={[styles.backLinkText, backHovered && styles.backLinkTextHover]}>
+              ← 홈으로
+            </Text>
+          </Pressable>
+        ) : null}
 
-          {/* 브랜드 */}
-          <View style={styles.brand}>
-            <Image
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              source={require('../../assets/images/logo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.formSlot}>
+            <LoginCard
+              email={email}
+              password={password}
+              showPw={showPw}
+              loading={loading}
+              guestLoading={guestLoading}
+              onEmailChange={setEmail}
+              onPasswordChange={setPassword}
+              onToggleShowPw={() => setShowPw((v) => !v)}
+              onLogin={handleLogin}
+              onGuest={handleGuestLogin}
+              onSignup={() => router.push('/(auth)/signup')}
+              onForgotPassword={() => setForgotVisible(true)}
             />
           </View>
+        </ScrollView>
 
-          {/* 폼 카드 */}
-          <View style={styles.card}>
-            {/* 이메일 */}
-            <View style={styles.inputWrap}>
-              <MaterialIcons name="email" size={20} color="#fff" style={styles.icon} />
-              <TextInput
-                style={styles.input}
-                placeholder="이메일"
-                placeholderTextColor="#9CA3AF"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoComplete="email"
-              />
-            </View>
+        <CenterNoticeModal
+          visible={notice != null}
+          title={notice?.title}
+          message={notice?.message ?? ''}
+          onClose={() => setNotice(null)}
+        />
 
-            {/* 비밀번호 */}
-            <View style={styles.inputWrap}>
-              <MaterialIcons name="lock" size={20} color="#fff" style={styles.icon} />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="비밀번호"
-                placeholderTextColor="#9CA3AF"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPw}
-                autoComplete="off"
-                textContentType="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity onPress={() => setShowPw(v => !v)} style={styles.eyeBtn}>
-                <MaterialIcons name={showPw ? 'visibility' : 'visibility-off'} size={20} color={NAVY} />
-              </TouchableOpacity>
-            </View>
-
-            {/* 로그인 버튼 */}
-            <TouchableOpacity
-              style={[styles.btn, loading && { opacity: 0.6 }]}
-              onPress={handleLogin}
-              disabled={loading}
-            >
-              {loading
-                ? <ActivityIndicator color={NAVY} />
-                : <Text style={styles.btnText}>로그인</Text>
-              }
-            </TouchableOpacity>
-          </View>
-
-          {/* 하단 링크 */}
-          <View style={styles.links}>
-            <TouchableOpacity onPress={() => router.push('/(auth)/signup')}>
-              <Text style={styles.linkText}>회원가입</Text>
-            </TouchableOpacity>
-            <Text style={styles.divider}>|</Text>
-            <TouchableOpacity
-              onPress={handleGuestLogin}
-              disabled={guestLoading}
-              style={{ opacity: guestLoading ? 0.6 : 1 }}
-            >
-              {guestLoading
-                ? <ActivityIndicator size="small" color={NAVY} />
-                : <Text style={styles.linkText}>로그인 없이 둘러보기</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        <ForgotPasswordModal
+          visible={forgotVisible}
+          initialEmail={email}
+          sending={resetSending}
+          onClose={() => setForgotVisible(false)}
+          onSubmit={handlePasswordReset}
+        />
+      </KeyboardAvoidingView>
+    </AuthScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F5F7FB' },
-  scroll: { flexGrow: 1, justifyContent: 'center' },
-  content: { flex: 1, padding: 28, justifyContent: 'center' },
-  brand: { alignItems: 'center', marginBottom: 18 },
-  logoImage: { width: 240, height: 160 },
-  card: {
-    backgroundColor: NAVY,
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: NAVY, shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25, shadowRadius: 20, elevation: 10,
-    marginBottom: 24,
+  root: {
+    flex: 1,
+    ...(Platform.OS === 'web' ? ({ minHeight: '100vh' as unknown as number } as object) : {}),
   },
-  inputWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 14,
-    paddingHorizontal: 14,
-    height: 54,
-  },
-  icon: { marginRight: 10, color: NAVY },
-  input: {
-    flex: 1, fontSize: 16,
-    color: NAVY,
-  },
-  eyeBtn: { padding: 4, color: NAVY },
-  btn: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    height: 54,
-    alignItems: 'center',
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
-    marginTop: 8,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 72 : 48,
+    paddingBottom: 48,
+    minHeight: Platform.OS === 'web' ? ('100vh' as unknown as number) : undefined,
   },
-  btnText: { fontSize: 17, fontWeight: '800', color: NAVY },
-  links: {
-    flexDirection: 'row', justifyContent: 'center',
-    alignItems: 'center', gap: 16,
+  formSlot: {
+    width: '100%',
+    maxWidth: AUTH.formWidth,
+    alignItems: 'center',
   },
-  linkText: { fontSize: 14, color: NAVY, fontWeight: '600' },
-  divider: { color: '#9CA3AF', fontSize: 14 },
+  backLink: {
+    position: 'absolute',
+    top: 28,
+    left: 28,
+    zIndex: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  backLinkText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: AUTH.textSub,
+    ...(Platform.OS === 'web' ? ({ transition: 'color 0.15s ease' } as object) : {}),
+  },
+  backLinkTextHover: {
+    color: AUTH.brand,
+  },
 });

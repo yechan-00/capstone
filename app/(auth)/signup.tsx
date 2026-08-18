@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Pressable,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView,
+  View, Text, TextInput, TouchableOpacity,
+  StyleSheet, KeyboardAvoidingView,
   Platform, ScrollView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { showAlert } from '@/utils/alert';
+import { AuthFormContainer } from '@/components/AuthFormContainer';
+import { AuthPasswordField, PASSWORD_LABEL } from '@/components/AuthPasswordField';
+import { AuthSubmitButton, webEnterKeyProps } from '@/components/AuthSubmitButton';
+import { CenterNoticeModal } from '@/components/CenterNoticeModal';
 import { validateEmail, validatePassword } from '@/utils/validation';
 import { mapFirebaseAuthError } from '@/utils/firebaseAuthErrors';
 
@@ -16,40 +19,58 @@ const NAVY = '#1B2D5B';
 export default function SignUpScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
+  const confirmPasswordRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<{ title?: string; message: string; onClose?: () => void } | null>(null);
 
-  const handleSignUp = async () => {
+  const showNotice = useCallback((message: string, title?: string, onClose?: () => void) => {
+    setNotice({ message, title, onClose });
+  }, []);
+
+  const handleSignUp = useCallback(async () => {
+    if (loading) return;
     if (!email.trim() || !password.trim() || !confirmPassword.trim()) {
-      showAlert('오류', '모든 항목을 입력해주세요.'); return;
+      showNotice('모든 항목을 입력해주세요.', '오류');
+      return;
     }
     if (!validateEmail(email)) {
-      showAlert('오류', '올바른 이메일 형식이 아닙니다.'); return;
+      showNotice('올바른 이메일 형식이 아닙니다.', '오류');
+      return;
     }
     const pv = validatePassword(password);
-    if (!pv.valid) { showAlert('오류', pv.message); return; }
+    if (!pv.valid) {
+      showNotice(pv.message ?? '비밀번호를 확인해주세요.', '오류');
+      return;
+    }
     if (password !== confirmPassword) {
-      showAlert('오류', '비밀번호가 일치하지 않습니다.'); return;
+      showNotice('비밀번호가 일치하지 않습니다.', '오류');
+      return;
     }
     try {
       setLoading(true);
       await signUp(email, password);
-      showAlert('성공', '회원가입이 완료되었습니다.', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)') },
-      ]);
-    } catch (error: any) {
-      showAlert('회원가입 실패', mapFirebaseAuthError(error, '회원가입에 실패했습니다.'));
+      showNotice('회원가입이 완료되었습니다.', '성공', () => router.replace('/(tabs)'));
+    } catch (error: unknown) {
+      showNotice(mapFirebaseAuthError(error, '회원가입에 실패했습니다.'), '회원가입 실패');
     } finally {
       setLoading(false);
     }
+  }, [confirmPassword, email, loading, password, router, showNotice, signUp]);
+
+  const closeNotice = () => {
+    const action = notice?.onClose;
+    setNotice(null);
+    action?.();
   };
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
 
           {/* 뒤로 버튼 */}
@@ -65,7 +86,7 @@ export default function SignUpScreen() {
           <Text style={styles.subtitle}>새 계정을 만드세요</Text>
 
           {/* 폼 카드 */}
-          <View style={styles.card}>
+          <AuthFormContainer style={styles.card}>
             {/* 이메일 */}
             <View style={styles.inputWrap}>
               <MaterialIcons name="email" size={20} color={NAVY} style={styles.icon} />
@@ -78,56 +99,59 @@ export default function SignUpScreen() {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 autoComplete="email"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordRef.current?.focus()}
+                {...webEnterKeyProps(() => passwordRef.current?.focus())}
+                editable={!loading}
               />
             </View>
 
             {/* 비밀번호 */}
-            <View style={styles.inputWrap}>
-              <MaterialIcons name="lock" size={20} color={NAVY} style={styles.icon} />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="비밀번호 (6자 이상)"
-                placeholderTextColor="#9CA3AF"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPw}
-                autoComplete="off"
-                textContentType="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity onPress={() => setShowPw(v => !v)} style={styles.eyeBtn}>
-                <MaterialIcons name={showPw ? 'visibility' : 'visibility-off'} size={20} color={NAVY} />
-              </TouchableOpacity>
-            </View>
+            <AuthPasswordField
+              ref={passwordRef}
+              placeholder={`${PASSWORD_LABEL} (6자 이상)`}
+              value={password}
+              onChangeText={setPassword}
+              textContentType="newPassword"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              showToggle
+              revealed={showPw}
+              onToggleReveal={() => setShowPw((v) => !v)}
+              onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+              {...webEnterKeyProps(() => confirmPasswordRef.current?.focus())}
+              editable={!loading}
+            />
 
             {/* 비밀번호 확인 */}
-            <View style={styles.inputWrap}>
-              <MaterialIcons name="lock" size={20} color={NAVY} style={styles.icon} />
-              <TextInput
-                style={styles.input}
-                placeholder="비밀번호 확인"
-                placeholderTextColor="#9CA3AF"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                autoComplete="off"
-                textContentType="none"
-                autoCorrect={false}
-              />
-            </View>
+            <AuthPasswordField
+              ref={confirmPasswordRef}
+              placeholder={`${PASSWORD_LABEL} 확인`}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              textContentType="newPassword"
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                void handleSignUp();
+              }}
+              {...webEnterKeyProps(() => {
+                void handleSignUp();
+              })}
+              editable={!loading}
+            />
 
             {/* 가입 버튼 */}
-            <Pressable
-              style={({ pressed }) => [styles.btn, loading && { opacity: 0.6 }, pressed && { opacity: 0.85 }]}
+            <AuthSubmitButton
+              label="회원가입"
+              loading={loading}
               onPress={handleSignUp}
-              disabled={loading}
-            >
-              {loading
-                ? <ActivityIndicator color={NAVY} />
-                : <Text style={styles.btnText}>회원가입</Text>
-              }
-            </Pressable>
-          </View>
+              style={styles.btn}
+              textStyle={styles.btnText}
+              spinnerColor={NAVY}
+              usePressable
+            />
+          </AuthFormContainer>
 
           {/* 하단 링크 */}
           <TouchableOpacity style={styles.link} onPress={() => router.back()}>
@@ -136,6 +160,13 @@ export default function SignUpScreen() {
 
         </View>
       </ScrollView>
+
+      <CenterNoticeModal
+        visible={notice != null}
+        title={notice?.title}
+        message={notice?.message ?? ''}
+        onClose={closeNotice}
+      />
     </KeyboardAvoidingView>
   );
 }

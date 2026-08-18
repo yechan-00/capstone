@@ -13,6 +13,47 @@ function isBlockedSignInError(code: string, message: string): boolean {
   );
 }
 
+/** 로그인 화면 전용 — 이메일/비밀번호 오류 구분 */
+export function mapLoginAuthError(err: unknown, fallback = '로그인에 실패했습니다.'): string {
+  const code =
+    typeof err === 'object' && err && 'code' in err ? String((err as { code?: string }).code) : '';
+  const message = err instanceof Error ? err.message : '';
+  if (isBlockedSignInError(code, message)) {
+    return BLOCKED_SIGN_IN_MESSAGE;
+  }
+  switch (code) {
+    case 'auth/operation-not-allowed':
+      return BLOCKED_SIGN_IN_MESSAGE;
+    case 'auth/user-not-found':
+      return '등록되지 않은 이메일 입니다!';
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return '이메일 또는 비밀번호를 확인해주세요.';
+    case 'auth/invalid-email':
+      return '이메일 형식을 확인해주세요.';
+    case 'auth/too-many-requests':
+      return '잠시 후 다시 시도해주세요.';
+    default:
+      return fallback;
+  }
+}
+
+/** 비밀번호 재설정 메일 */
+export function mapPasswordResetError(err: unknown, fallback = '메일 전송에 실패했습니다.'): string {
+  const code =
+    typeof err === 'object' && err && 'code' in err ? String((err as { code?: string }).code) : '';
+  switch (code) {
+    case 'auth/invalid-email':
+      return '이메일 형식을 확인해주세요.';
+    case 'auth/user-not-found':
+      return '등록되지 않은 이메일입니다.';
+    case 'auth/too-many-requests':
+      return '잠시 후 다시 시도해주세요.';
+    default:
+      return fallback;
+  }
+}
+
 export function mapFirebaseAuthError(err: unknown, fallback: string): string {
   const code =
     typeof err === 'object' && err && 'code' in err ? String((err as { code?: string }).code) : '';

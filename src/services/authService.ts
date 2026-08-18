@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
   User,
   UserCredential,
   EmailAuthProvider,
@@ -77,6 +78,15 @@ export const signIn = async (email: string, password: string): Promise<UserCrede
     return await signInWithEmailAndPassword(auth, email, password);
   } catch (error: any) {
     console.error('Failed to sign in:', error);
+    throw error;
+  }
+};
+
+export const sendPasswordReset = async (email: string): Promise<void> => {
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+  } catch (error) {
+    console.error('Failed to send password reset email:', error);
     throw error;
   }
 };
