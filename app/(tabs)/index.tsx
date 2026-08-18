@@ -13,11 +13,13 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FlipInEasyX, FlipOutEasyX } from 'react-native-reanimated';
 import { useAuth } from '@/hooks/useAuth';
 import { useRegretPatternAlertSync } from '@/hooks/useRegretPatternAlertSync';
 import { useRefreshPendingReviewCountOnFocus } from '@/hooks/usePendingReviewCount';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
+import { HomeSummaryHero } from '@/components/HomeSummaryHero';
 import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
 import { ensureNotificationPermission } from '@/services/notificationService';
@@ -25,6 +27,7 @@ import { scheduleService } from '@/services/scheduleService';
 import { toUserMessage } from '@/utils/error';
 import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
 import { useTheme } from '@/theme/ThemeContext';
+import { BRAND_GREEN_LIGHT } from '@/theme/ThemeContext';
 
 
 import type { Expense, ExpenseCategory, Review, ReviewSchedule } from '@/lib/types';
@@ -45,6 +48,7 @@ import { loadAllTimePatternInsights } from '@/services/regretPatternAlertService
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors, isDark, animationsEnabled } = useTheme();
   const { width, height } = useWindowDimensions();
   const isCompact = height < 760 || width < 420;
@@ -78,8 +82,13 @@ export default function HomeScreen() {
     Map<string, ReviewSchedule>
   >(() => new Map());
   const lastFocusRefreshAtRef = React.useRef(0);
+  /** 월 이동·중복 요청 시 이전 응답이 state를 덮어쓰지 않도록 */
+  const loadSeqRef = React.useRef(0);
+  const viewingMonthRef = React.useRef(currentMonth);
 
-  const monthBusyRef = React.useRef(false);
+  React.useEffect(() => {
+    viewingMonthRef.current = currentMonth;
+  }, [currentMonth]);
 
   const budgetPeriod = React.useMemo(() => {
     if (!account) {
@@ -148,7 +157,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!authLoading && !user) {
-      router.replace('/(auth)/login');
+      router.replace(Platform.OS === 'web' ? '/home' : '/(auth)/login');
     }
   }, [user, authLoading]);
 
@@ -215,59 +224,80 @@ export default function HomeScreen() {
       // 포커스가 짧은 간격으로 반복될 때 과도한 로딩 토글(깜빡임) 방지
       if (now - lastFocusRefreshAtRef.current < 1200) return;
       lastFocusRefreshAtRef.current = now;
-      void loadMonthExpenses(true);
+      void loadMonthExpensesRef.current?.(true);
       void loadAllTimePatternInsights(account.id)
         .then(({ weekdayInsights, timeOfDayInsights }) => {
           setRegretPatternHeadline(buildRegretPatternHomeHeadline(weekdayInsights, timeOfDayInsights));
         })
         .catch(() => setRegretPatternHeadline(null));
-    }, [account, currentMonth])
+    }, [account])
   );
 
 const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | null>(null);
 
+  const isStaleMonthLoad = (seq: number, month: Date) => {
+    const viewing = viewingMonthRef.current;
+    return (
+      seq !== loadSeqRef.current ||
+      month.getFullYear() !== viewing.getFullYear() ||
+      month.getMonth() !== viewing.getMonth()
+    );
+  };
+
   const loadMonthExpenses = async (silent: boolean): Promise<Expense[] | undefined> => {
-    if (!account || monthBusyRef.current) return undefined;
-    monthBusyRef.current = true;
+    if (!account) return undefined;
+    const seq = ++loadSeqRef.current;
+    const monthSnapshot = new Date(viewingMonthRef.current.getTime());
     try {
       if (!silent) setLoading(true);
       setError(null);
 
-      const y = currentMonth.getFullYear();
-      const m = currentMonth.getMonth();
+      const y = monthSnapshot.getFullYear();
+      const m = monthSnapshot.getMonth();
       const calStart = new Date(y, m, 1, 0, 0, 0, 0);
       const calEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
       const period = budgetPeriodForMonth(y, m, account);
       const start = new Date(Math.min(calStart.getTime(), period.start.getTime()));
       const end = new Date(Math.max(calEnd.getTime(), period.end.getTime()));
       const data = await expenseService.getByAccountIdInRange(account.id, start, end);
+      if (isStaleMonthLoad(seq, monthSnapshot)) return undefined;
       setExpenses(data);
+
       try {
         const revMap = await reviewService.getLatestByExpenseIds(
           account.id,
-          data.map((e) => e.id)
+          data.map((e) => e.id),
         );
+        if (isStaleMonthLoad(seq, monthSnapshot)) return data;
         setReviewsByExpenseId(revMap);
+      } catch (reviewErr) {
+        console.warn('[home] reviews load failed', reviewErr);
+      }
+
+      try {
         const pendMap = await scheduleService.getEarliestPendingScheduleByExpenseIds(
           account.id,
           data.map((e) => e.id),
           { includePastGraceWindow: true },
         );
+        if (isStaleMonthLoad(seq, monthSnapshot)) return data;
         setPendingScheduleByExpenseId(pendMap);
-      } catch {
-        setReviewsByExpenseId(new Map());
-        setPendingScheduleByExpenseId(new Map());
+      } catch (scheduleErr) {
+        console.warn('[home] pending schedules load failed', scheduleErr);
       }
+
       return data;
     } catch (err) {
+      if (isStaleMonthLoad(seq, monthSnapshot)) return undefined;
       const e = err instanceof Error ? err : new Error('소비 목록을 불러오는데 실패했습니다.');
       setError(e);
       setReviewsByExpenseId(new Map());
       setPendingScheduleByExpenseId(new Map());
       return undefined;
     } finally {
-      if (!silent) setLoading(false);
-      monthBusyRef.current = false;
+      // silent 여부와 관계없이 «가장 최신» 요청이 끝나면 로딩 해제
+      // (silent가 non-silent를 덮어쓴 뒤 loading이 true에 갇히는 문제 방지)
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   };
 
@@ -332,13 +362,19 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
   const cardElev =
     !isDark && Platform.OS !== 'web'
       ? {
-          shadowColor: '#1a2d4a',
+          shadowColor: '#34C36F',
           shadowOffset: { width: 0, height: 5 },
-          shadowOpacity: 0.07,
+          shadowOpacity: 0.06,
           shadowRadius: 14,
           elevation: 4,
         }
       : {};
+
+  const heroTitle = resolveBudgetPeriodMode(account) === 'payday' ? '식비 주기' : '이번 달 소비';
+  const heroSubtitle =
+    resolveBudgetPeriodMode(account) === 'payday'
+      ? formatBudgetPeriodRange(budgetPeriod.start, budgetPeriod.end)
+      : formatMonth(currentMonth);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -347,8 +383,32 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           <Text style={[styles.offlineText, { color: colors.offlineText }]}>네트워크 연결이 필요합니다</Text>
         </View>
       )}
-      {regretPatternHeadline ? (
-        <View style={styles.patternSection}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.list,
+          isCompact && styles.listCompact,
+          { paddingTop: Math.max(insets.top, 12) + 8 },
+        ]}
+      >
+        <View style={styles.homeTopBar}>
+          <Text style={[styles.homeGreeting, { color: colors.text }]}>오늘도 좋은 선택을 응원해요!</Text>
+          <Pressable
+            onPress={() => router.push('/(tabs)/settings')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="설정"
+          >
+            <MaterialIcons name="notifications-none" size={24} color={colors.textSec} />
+          </Pressable>
+        </View>
+
+        <HomeSummaryHero
+          title={heroTitle}
+          subtitle={heroSubtitle}
+          totalAmount={monthTotalAmount}
+          budgetKrw={foodBudgetKrw}
+        />
+        {regretPatternHeadline ? (
           <View
             style={[
               styles.patternCardOuter,
@@ -356,8 +416,8 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               cardElev,
             ]}
           >
-            <View style={[styles.patternIconWrap, { backgroundColor: isDark ? colors.surfaceMuted : '#EEF2FF' }]}>
-              <MaterialIcons name="schedule" size={20} color={isDark ? '#a5b4fc' : '#4f46e5'} />
+            <View style={[styles.patternIconWrap, { backgroundColor: isDark ? colors.surfaceMuted : BRAND_GREEN_LIGHT }]}>
+              <MaterialIcons name="schedule" size={20} color={colors.primary} />
             </View>
             <View style={styles.patternTextWrap}>
               <Text style={[styles.patternTitle, { color: colors.text }]}>후회 많은 시간</Text>
@@ -367,12 +427,11 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               ) : null}
             </View>
           </View>
+        ) : null}
+
+        <View style={styles.spendingHeader}>
+          <Text style={[styles.spendingHeaderTitle, { color: colors.textSec }]}>소비 요약</Text>
         </View>
-      ) : null}
-      <View style={styles.spendingHeader}>
-        <Text style={[styles.spendingHeaderTitle, { color: colors.textSec }]}>이번 달 요약</Text>
-      </View>
-      <ScrollView contentContainerStyle={[styles.list, isCompact && styles.listCompact]}>
         <View
           style={[
             styles.breakdownCard,
@@ -1003,11 +1062,24 @@ const styles = StyleSheet.create({
   spendingHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 4,
+    paddingTop: 4,
+    paddingBottom: 2,
   },
-  spendingHeaderTitle: { fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
+  spendingHeaderTitle: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  homeTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 4,
+  },
+  homeGreeting: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    lineHeight: 28,
+  },
   patternSection: {
     marginTop: 12,
     marginHorizontal: 16,
@@ -1044,7 +1116,7 @@ const styles = StyleSheet.create({
   },
   calendarCard: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 12,
   },
   calendarCardCompact: {
@@ -1111,7 +1183,7 @@ const styles = StyleSheet.create({
   },
   breakdownCard: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
+    borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },

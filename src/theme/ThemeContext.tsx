@@ -40,56 +40,63 @@ export const DEFAULT_PRESETS: AccentPreset[] = [];
 /** 네이비 기본값 */
 export const NAVY_PRESET: AccentPreset = { key: 'navy', label: '네이비', color: '#1a2d4a' };
 
+/** 브랜드 그린 (기본) */
+export const GREEN_PRESET: AccentPreset = { key: 'green', label: '그린', color: '#34C36F' };
+
+export const BRAND_GREEN = '#34C36F';
+export const BRAND_GREEN_DARK = '#2AAD5C';
+export const BRAND_GREEN_LIGHT = '#E8F8EE';
+
 export function isCustomHex(key: string): boolean {
   return key.startsWith('#');
 }
 
 // ── 다크 고정 팔레트 ──────────────────────────────────
 const darkBase: ThemeColors = {
-  bg: '#0F1419', surface: '#1A2332', surfaceMuted: '#232f42',
-  text: '#E2E8F0', textSec: '#94A3B8', textMuted: '#64748B',
-  border: '#2A3548', borderInput: '#334155',
-  primary: '#3B82F6', primaryDark: '#2563EB', onPrimary: '#FFFFFF',
-  tabActive: '#3B82F6', tabInactive: '#64748B',
-  tabBarBg: '#1A2332', tabBarBorder: '#2A3548',
-  headerBg: '#1A2F4A', headerGradientStart: '#0F1F35', headerGradientEnd: '#1A2F4A',
-  headerTint: '#E2E8F0',
-  chipInactiveBg: '#232f42', chipActiveBg: '#3B82F6',
-  chipInactiveBorder: '#334155', chipActiveBorder: '#3B82F6',
-  chipTextInactive: '#E2E8F0', chipTextActive: '#FFFFFF',
-  catPill: '#232f42', gridActiveBg: '#1e3a5f', gridActiveBorder: '#3B82F6', gridTextActive: '#93C5FD',
-  pillBg: '#232f42', pillActiveBg: '#1e3a5f', pillActiveBorder: '#3B82F6',
-  pillText: '#94A3B8', pillTextActive: '#93C5FD',
-  choiceBg: '#232f42', choiceActiveBg: '#1e3a5f', choiceActiveBorder: '#3B82F6', choiceTextActive: '#93C5FD',
-  accentBlue: '#60A5FA', accentCta: '#3B82F6', keyFindingBg: '#4F46E5',
+  bg: '#0B0F0E', surface: '#151A19', surfaceMuted: '#1E2624',
+  text: '#F1F5F4', textSec: '#A8B5B0', textMuted: '#6B7A74',
+  border: '#2A3430', borderInput: '#33403C',
+  primary: BRAND_GREEN, primaryDark: BRAND_GREEN_DARK, onPrimary: '#0B0F0E',
+  tabActive: BRAND_GREEN, tabInactive: '#6B7A74',
+  tabBarBg: '#151A19', tabBarBorder: '#2A3430',
+  headerBg: '#151A19', headerGradientStart: '#0B0F0E', headerGradientEnd: '#151A19',
+  headerTint: '#F1F5F4',
+  chipInactiveBg: '#1E2624', chipActiveBg: BRAND_GREEN,
+  chipInactiveBorder: '#33403C', chipActiveBorder: BRAND_GREEN,
+  chipTextInactive: '#F1F5F4', chipTextActive: '#0B0F0E',
+  catPill: '#1E2624', gridActiveBg: '#1A2E24', gridActiveBorder: BRAND_GREEN, gridTextActive: '#BFFF00',
+  pillBg: '#1E2624', pillActiveBg: '#1A2E24', pillActiveBorder: BRAND_GREEN,
+  pillText: '#A8B5B0', pillTextActive: '#BFFF00',
+  choiceBg: '#1E2624', choiceActiveBg: '#1A2E24', choiceActiveBorder: BRAND_GREEN, choiceTextActive: '#BFFF00',
+  accentBlue: '#7DD3A8', accentCta: BRAND_GREEN, keyFindingBg: '#1A2E24',
   offlineBg: '#422006', offlineBorder: '#78350f', offlineText: '#fcd34d',
   logoutBorder: '#7f1d1d', logoutText: '#fca5a5', errorText: '#f87171',
-  inputBg: '#151c28', placeholder: '#64748B', addTabLabel: '#94A3B8', emptyIcon: '#64748B',
-  starColor: '#fbbf24', categoryLabelBg: '#232f42', success: '#4ade80',
+  inputBg: '#111614', placeholder: '#6B7A74', addTabLabel: '#A8B5B0', emptyIcon: '#6B7A74',
+  starColor: '#fbbf24', categoryLabelBg: '#1E2624', success: '#4ade80',
 };
 
 // ── 라이트 기본 팔레트 ────────────────────────────────
 const lightBase: ThemeColors = {
-  bg: '#f5f6f8', surface: '#ffffff', surfaceMuted: '#eef1f6',
-  text: '#1c2434', textSec: '#5c6578', textMuted: '#8b94a7',
-  border: '#e4e8f0', borderInput: '#d8dde8',
-  primary: '#1a2d4a', primaryDark: '#132238', onPrimary: '#ffffff',
-  tabActive: '#1a2d4a', tabInactive: '#9aa3b2',
-  tabBarBg: '#ffffff', tabBarBorder: '#e8ecf4',
-  headerBg: '#f5f6f8', headerGradientStart: '#1a2d4a', headerGradientEnd: '#1a2d4a',
-  headerTint: '#1c2434',
-  chipInactiveBg: '#f3f5f9', chipActiveBg: '#1a2d4a',
-  chipInactiveBorder: '#e4e8f0', chipActiveBorder: '#1a2d4a',
-  chipTextInactive: '#1c2434', chipTextActive: '#ffffff',
-  catPill: '#e8ecf4', gridActiveBg: '#e8edf5', gridActiveBorder: '#1a2d4a', gridTextActive: '#1a2d4a',
-  pillBg: '#eef1f6', pillActiveBg: '#e8edf5', pillActiveBorder: '#c5d0e6',
-  pillText: '#5c6578', pillTextActive: '#1a2d4a',
-  choiceBg: '#ffffff', choiceActiveBg: '#e8edf5', choiceActiveBorder: '#1a2d4a', choiceTextActive: '#1a2d4a',
-  accentBlue: '#3d5a80', accentCta: '#1a2d4a', keyFindingBg: '#4F46E5',
+  bg: '#F5F7F4', surface: '#ffffff', surfaceMuted: '#EEF2EE',
+  text: '#1A2E24', textSec: '#4A5C52', textMuted: '#7A8A82',
+  border: '#E2EAE5', borderInput: '#D5E0DA',
+  primary: BRAND_GREEN, primaryDark: BRAND_GREEN_DARK, onPrimary: '#ffffff',
+  tabActive: BRAND_GREEN, tabInactive: '#9AA8A0',
+  tabBarBg: '#ffffff', tabBarBorder: '#E8EEEA',
+  headerBg: '#F5F7F4', headerGradientStart: '#ffffff', headerGradientEnd: '#ffffff',
+  headerTint: '#1A2E24',
+  chipInactiveBg: '#F0F4F1', chipActiveBg: BRAND_GREEN,
+  chipInactiveBorder: '#E2EAE5', chipActiveBorder: BRAND_GREEN,
+  chipTextInactive: '#1A2E24', chipTextActive: '#ffffff',
+  catPill: '#E8F0EA', gridActiveBg: BRAND_GREEN_LIGHT, gridActiveBorder: BRAND_GREEN, gridTextActive: BRAND_GREEN_DARK,
+  pillBg: '#EEF2EE', pillActiveBg: BRAND_GREEN_LIGHT, pillActiveBorder: '#B8E6C8',
+  pillText: '#4A5C52', pillTextActive: BRAND_GREEN_DARK,
+  choiceBg: '#ffffff', choiceActiveBg: BRAND_GREEN_LIGHT, choiceActiveBorder: BRAND_GREEN, choiceTextActive: BRAND_GREEN_DARK,
+  accentBlue: '#2AAD5C', accentCta: BRAND_GREEN, keyFindingBg: '#1A2E24',
   offlineBg: '#FFF3CD', offlineBorder: '#FFE69C', offlineText: '#856404',
   logoutBorder: '#FCA5A5', logoutText: '#B91C1C', errorText: '#FF6B6B',
-  inputBg: '#f8f9fc', placeholder: '#98a2b3', addTabLabel: '#5c6578', emptyIcon: '#b4bcc9',
-  starColor: '#CA8A04', categoryLabelBg: '#eef1f6', success: '#2E7D32',
+  inputBg: '#F8FAF8', placeholder: '#9AA8A0', addTabLabel: '#4A5C52', emptyIcon: '#B4C0BA',
+  starColor: '#CA8A04', categoryLabelBg: '#EEF2EE', success: '#2AAD5C',
 };
 
 function darken(hex: string): string {
@@ -136,8 +143,8 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isDark, setIsDarkState]         = useState(false);
   const [hydrated, setHydrated]          = useState(false);
-  const [accentKey, setAccentKeyState]   = useState('#1a2d4a');
-  const [customPresets, setCustomPresets] = useState<AccentPreset[]>([NAVY_PRESET]);
+  const [accentKey, setAccentKeyState]   = useState(BRAND_GREEN);
+  const [customPresets, setCustomPresets] = useState<AccentPreset[]>([GREEN_PRESET, NAVY_PRESET]);
   const [animationsEnabled, setAnimationsEnabledState] = useState(true);
 
   // AsyncStorage 초기 로드
@@ -158,10 +165,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         try {
           const parsed: AccentPreset[] = JSON.parse(presetsVal);
           // 네이비가 없으면 맨 앞에 추가
+          const hasGreen = parsed.some(p => p.key === 'green');
           const hasNavy = parsed.some(p => p.key === 'navy');
-          setCustomPresets(hasNavy ? parsed : [NAVY_PRESET, ...parsed]);
+          let presets = parsed;
+          if (!hasGreen) presets = [GREEN_PRESET, ...presets];
+          if (!hasNavy) presets = [...presets, NAVY_PRESET];
+          setCustomPresets(presets);
         } catch {
-          setCustomPresets([NAVY_PRESET]);
+          setCustomPresets([GREEN_PRESET, NAVY_PRESET]);
         }
       }
       setHydrated(true);

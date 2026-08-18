@@ -105,6 +105,7 @@ export default function EditExpenseScreen() {
   const [spentAt, setSpentAt] = useState(new Date());
   const [tempSpentAt, setTempSpentAt] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerPhase, setDatePickerPhase] = useState<'date' | 'time'>('date');
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -273,15 +274,24 @@ export default function EditExpenseScreen() {
 
   const handleDatePickerOpen = () => {
     setTempSpentAt(spentAt);
+    setDatePickerPhase('date');
     setShowDatePicker(true);
   };
 
   const handleDatePickerConfirm = () => {
+    if (datePickerPhase === 'date') {
+      setDatePickerPhase('time');
+      return;
+    }
     setSpentAt(tempSpentAt);
     setShowDatePicker(false);
   };
 
   const handleDatePickerCancel = () => {
+    if (datePickerPhase === 'time') {
+      setDatePickerPhase('date');
+      return;
+    }
     setShowDatePicker(false);
   };
 
@@ -1021,49 +1031,62 @@ export default function EditExpenseScreen() {
           <View style={styles.webDatePanel}>
             <View style={styles.datePickerHeader}>
               <Pressable onPress={handleDatePickerCancel}>
-                <Text style={styles.datePickerCancel}>취소</Text>
+                <Text style={styles.datePickerCancel}>
+                  {datePickerPhase === 'time' ? '이전' : '취소'}
+                </Text>
               </Pressable>
-              <Text style={styles.datePickerTitle}>날짜 및 시간 선택</Text>
+              <Text style={styles.datePickerTitle}>
+                {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
+              </Text>
               <Pressable onPress={handleDatePickerConfirm}>
-                <Text style={styles.datePickerConfirm}>완료</Text>
+                <Text style={styles.datePickerConfirm}>
+                  {datePickerPhase === 'date' ? '다음' : '완료'}
+                </Text>
               </Pressable>
             </View>
             <View style={styles.webDateTimeWrap}>
-              <Text style={styles.webDateTimeLabel}>날짜 (연도 → 월 → 일)</Text>
-              {React.createElement('input', {
-                type: 'date',
-                lang: 'ko-KR',
-                value: webDateValue,
-                onChange: (e: any) => handleWebDateChange(e?.target?.value ?? ''),
-                style: {
-                  height: 40,
-                  borderRadius: 10,
-                  border: '1px solid #D1D5DB',
-                  padding: '0 10px',
-                  fontSize: 14,
-                  color: '#111827',
-                  background: '#fff',
-                },
-              })}
-              <Text style={[styles.webDateTimeLabel, { marginTop: 12 }]}>시간 (24시간)</Text>
-              {React.createElement('input', {
-                type: 'time',
-                lang: 'ko-KR',
-                value: webTimeValue,
-                onChange: (e: any) => handleWebTimeChange(e?.target?.value ?? ''),
-                style: {
-                  height: 40,
-                  borderRadius: 10,
-                  border: '1px solid #D1D5DB',
-                  padding: '0 10px',
-                  fontSize: 14,
-                  color: '#111827',
-                  background: '#fff',
-                },
-              })}
-              <Text style={styles.webDatePreview}>
-                {tempSpentAt.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' })}
-              </Text>
+              {datePickerPhase === 'date' ? (
+                <>
+                  <Text style={styles.webDateTimeLabel}>날짜</Text>
+                  {React.createElement('input', {
+                    type: 'date',
+                    lang: 'ko-KR',
+                    value: webDateValue,
+                    onChange: (e: any) => handleWebDateChange(e?.target?.value ?? ''),
+                    style: {
+                      height: 40,
+                      borderRadius: 10,
+                      border: '1px solid #D1D5DB',
+                      padding: '0 10px',
+                      fontSize: 14,
+                      color: '#111827',
+                      background: '#fff',
+                    },
+                  })}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.webDateTimeLabel}>시간 (24시간)</Text>
+                  {React.createElement('input', {
+                    type: 'time',
+                    lang: 'ko-KR',
+                    value: webTimeValue,
+                    onChange: (e: any) => handleWebTimeChange(e?.target?.value ?? ''),
+                    style: {
+                      height: 40,
+                      borderRadius: 10,
+                      border: '1px solid #D1D5DB',
+                      padding: '0 10px',
+                      fontSize: 14,
+                      color: '#111827',
+                      background: '#fff',
+                    },
+                  })}
+                  <Text style={styles.webDatePreview}>
+                    {tempSpentAt.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' })}
+                  </Text>
+                </>
+              )}
             </View>
           </View>
         )}
@@ -1075,25 +1098,28 @@ export default function EditExpenseScreen() {
               <View style={styles.datePickerContent}>
                 <View style={styles.datePickerHeader}>
                   <Pressable onPress={handleDatePickerCancel}>
-                    <Text style={styles.datePickerCancel}>취소</Text>
+                    <Text style={styles.datePickerCancel}>
+                      {datePickerPhase === 'time' ? '이전' : '취소'}
+                    </Text>
                   </Pressable>
-                  <Text style={styles.datePickerTitle}>날짜 및 시간 선택</Text>
+                  <Text style={styles.datePickerTitle}>
+                    {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
+                  </Text>
                   <Pressable onPress={handleDatePickerConfirm}>
-                    <Text style={styles.datePickerConfirm}>완료</Text>
+                    <Text style={styles.datePickerConfirm}>
+                      {datePickerPhase === 'date' ? '다음' : '완료'}
+                    </Text>
                   </Pressable>
                 </View>
-                <ScrollView
-                  style={{ maxHeight: 440 }}
-                  contentContainerStyle={{ paddingBottom: 20 }}
-                  keyboardShouldPersistTaps="handled"
-                >
+                <View style={{ paddingBottom: 20 }}>
                   <SpentAtDateTimePickers
+                    phase={datePickerPhase}
                     value={tempSpentAt}
                     onChange={setTempSpentAt}
                     textColor={colors.text}
                     themeVariant={isDark ? 'dark' : 'light'}
                   />
-                </ScrollView>
+                </View>
               </View>
             </View>
           </Modal>

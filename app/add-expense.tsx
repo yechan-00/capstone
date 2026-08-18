@@ -1095,7 +1095,6 @@ export default function AddExpenseScreen() {
                     phase={datePickerPhase}
                     value={tempSpentAt}
                     onChange={setTempSpentAt}
-                    onDateSelected={() => setDatePickerPhase('time')}
                     textColor={colors.text}
                     themeVariant={isDark ? 'dark' : 'light'}
                   />

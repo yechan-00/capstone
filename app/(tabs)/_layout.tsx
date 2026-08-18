@@ -5,6 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import {
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -90,7 +91,7 @@ function TabHeaderBackground({
       />
     );
   }
-  return <View style={[StyleSheet.absoluteFill, { backgroundColor: solid }]} />;
+  return <View style={[StyleSheet.absoluteFill, { backgroundColor: solid, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E8EEEA' }]} />;
 }
 
 const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
@@ -496,13 +497,19 @@ function TabsNavigator() {
   const router = useRouter();
   const { colors, isDark, animationsEnabled } = useTheme();
   const { width } = useWindowDimensions();
-  const headerTitleColor = isDark ? colors.headerTint : colors.onPrimary;
+  const headerTitleColor = isDark ? colors.headerTint : colors.text;
   const { count: pendingReviewCount } = usePendingReviewCount();
 
-  const { account } = useAuth();
+  const { account, user, loading: authLoading } = useAuth();
   const { createExpense } = useExpenses();
   const [showQuickSheet, setShowQuickSheet] = useState(false);
   const [quickPresets, setQuickPresets] = useState<QuickPreset[]>([]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace(Platform.OS === 'web' ? '/home' : '/(auth)/login');
+    }
+  }, [authLoading, router, user]);
 
   const reviewTabBadge =
     pendingReviewCount > 0 ? (pendingReviewCount > 99 ? '99+' : pendingReviewCount) : undefined;
@@ -534,7 +541,7 @@ function TabsNavigator() {
 
   return (
     <>
-      <StatusBar style="light" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Tabs
         screenOptions={{
           headerShown: true,
@@ -554,7 +561,7 @@ function TabsNavigator() {
               isDark={isDark}
               gradientStart={colors.headerGradientStart}
               gradientEnd={colors.headerGradientEnd}
-              solid={colors.accentCta}
+              solid={colors.surface}
             />
           ),
           headerTintColor: headerTitleColor,
@@ -562,7 +569,15 @@ function TabsNavigator() {
           headerShadowVisible: false,
         }}
       >
-        <Tabs.Screen name="index" options={{ title: '후회가계부', tabBarLabel: '홈', tabBarIcon: ({ color, size }) => <MaterialIcons name="home" size={size} color={color} /> }} />
+        <Tabs.Screen
+          name="index"
+          options={{
+            headerShown: false,
+            title: '후회가계부',
+            tabBarLabel: '홈',
+            tabBarIcon: ({ color, size }) => <MaterialIcons name="home" size={size} color={color} />,
+          }}
+        />
         <Tabs.Screen
           name="reviews"
           options={{
@@ -633,7 +648,7 @@ const styles = StyleSheet.create({
     width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
     marginTop: -18,
-    shadowColor: '#1a2d4a', shadowOffset: { width: 0, height: 4 },
+    shadowColor: '#34C36F', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.22, shadowRadius: 10, elevation: 8,
   },
   addTabLabel: { marginTop: 2, fontSize: 11, fontWeight: '700' },
