@@ -14,8 +14,8 @@ export const EXPENSE_MOODS = EXPENSE_MOOD_OPTIONS.map((m) => ({
 
 export { REGRET_REASONS } from './regretReasons';
 
-/** 신규 스케줄 기준(D+3). 레거시 문서는 다른 delayDays 유지 */
-export const REVIEW_DELAY_DAYS = [3] as const;
+/** @deprecated 신규 스케줄은 D+1(다음날 0시). 레거시 문서 호환용 */
+export const REVIEW_DELAY_DAYS = [1] as const;
 
 export const TIME_OF_DAY_RANGES = {
   morning: { start: 6, end: 12 },

@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   ReactNode,
 } from 'react';
@@ -13,6 +14,7 @@ import { Account } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays } from '@/lib/accountSettings';
 import { toAccountId } from '@/lib/accountId';
 import * as authService from '@/services/authService';
+import { scheduleService } from '@/services/scheduleService';
 import { backfillUserIdForAccount } from '@/services/userDataMigration';
 
 interface AuthContextType {
@@ -49,19 +51,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
+  const authLoadSeq = useRef(0);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+      const seq = ++authLoadSeq.current;
+      setUser(nextUser);
       try {
-        if (user) {
-          const userAccount = await authService.getUserAccount(user.uid);
+        if (nextUser) {
+          const userAccount = await authService.getUserAccount(nextUser.uid);
+          if (authLoadSeq.current !== seq) return;
           if (userAccount) {
             setAccount(userAccount);
           } else {
             setAccount({
-              id: toAccountId(user.uid),
-              userId: user.uid,
+              id: toAccountId(nextUser.uid),
+              userId: nextUser.uid,
               name: '내 가계부',
               nickname: '',
               notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
@@ -80,12 +85,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setAccount(null);
         }
       } catch (error) {
+        if (authLoadSeq.current !== seq) return;
         console.error('Failed to load account:', error);
-        if (user) {
+        if (nextUser) {
           // 오프라인 등으로 계정 조회 실패 시 최소 정보로 진입 허용
           setAccount({
-            id: toAccountId(user.uid),
-            userId: user.uid,
+            id: toAccountId(nextUser.uid),
+            userId: nextUser.uid,
             name: '내 가계부',
             nickname: '',
             notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
@@ -99,14 +105,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             updatedAt: new Date(),
           });
         } else {
-          try {
-            await signInAnonymously(auth);
-          } catch {
-            setAccount(null);
-          }
+          setAccount(null);
         }
       } finally {
-        setLoading(false);
+        if (authLoadSeq.current === seq) {
+          setLoading(false);
+        }
       }
     });
 
@@ -130,7 +134,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const logout = useCallback(async () => {
+    authLoadSeq.current += 1;
     await authService.logout();
+    setUser(null);
     setAccount(null);
   }, []);
 
@@ -153,6 +159,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!uid) return;
       const accountId = toAccountId(uid);
       await authService.updateReviewReminderSettings(accountId, enabled, reviewReminderTime);
+      await scheduleService.reschedulePendingReviewNotifications(
+        accountId,
+        reviewReminderTime,
+        enabled,
+      );
       setAccount((prev) =>
         prev
           ? {

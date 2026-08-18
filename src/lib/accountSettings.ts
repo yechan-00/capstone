@@ -4,7 +4,7 @@ import type { Account } from '@/lib/types';
 export const DEFAULT_REVIEW_REMINDER_TIME = '19:00';
 
 export const DEFAULT_EXCHANGE_USD_KRW = 1470.05;
-export const DEFAULT_REVIEW_DELAY_DAYS: readonly (1 | 3 | 7 | 30)[] = [3];
+export const DEFAULT_REVIEW_DELAY_DAYS: readonly (1 | 3 | 7 | 30)[] = [1];
 
 /**
  * 계정에 저장된 월 수입을 원화 기준으로 환산합니다.

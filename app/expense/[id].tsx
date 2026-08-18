@@ -9,19 +9,23 @@ import {
   Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme/ThemeContext';
 import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
 import { scheduleService } from '@/services/scheduleService';
+import { shareService } from '@/services/shareService';
 import { Expense, Review, ReviewSchedule } from '@/lib/types';
 import { useAuth } from '@/hooks/useAuth';
 import { EXPENSE_CATEGORIES } from '@/lib/constants';
 import { expenseMoodLabel } from '@/lib/expenseMood';
+import { expenseCategoryLabel } from '@/lib/expenseCategoryLabel';
 import { regretReasonLabel } from '@/lib/regretReasons';
 import { satisfactionLabel } from '@/lib/satisfactionScale';
 import { formatDate } from '@/utils/time';
 import { scheduleDueLabel } from '@/lib/scheduleLabels';
+import { shareExpenseLink } from '@/lib/shareLinks';
 import { showAlert } from '@/utils/alert';
 import { firstParam } from '@/utils/routerParams';
 
@@ -30,13 +34,14 @@ export default function ExpenseDetailScreen() {
   const id = firstParam(rawParams.id);
   const scheduleId = firstParam(rawParams.scheduleId);
   const router = useRouter();
-  const { account } = useAuth();
+  const { account, user } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [expense, setExpense] = useState<Expense | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [schedules, setSchedules] = useState<ReviewSchedule[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     if (scheduleId && id) {
@@ -104,15 +109,63 @@ export default function ExpenseDetailScreen() {
     EXPENSE_CATEGORIES.find((c) => c.value === expense.category)?.label || expense.category;
   const moodLabel = expenseMoodLabel(expense.mood, { withEmoji: true });
 
+  const handleShare = async () => {
+    if (!account?.id || !user?.uid || sharing) return;
+    try {
+      setSharing(true);
+      const title = (expense.item ?? expense.content)?.trim() || expenseCategoryLabel(expense.category);
+      const subtitle = expense.reason?.trim() || title;
+      const { webUrl } = await shareService.getOrCreateExpenseShare({
+        expenseId: expense.id,
+        accountId: account.id,
+        userId: user.uid,
+        title,
+        subtitle,
+        amount: expense.amount,
+        category: expense.category === 'food' ? 'takeout' : expense.category,
+        imageUrl: expense.imageUrl,
+        spentAt: expense.spentAt,
+      });
+      await shareExpenseLink({
+        title,
+        subtitle,
+        amount: expense.amount,
+        category: expense.category === 'food' ? 'takeout' : expense.category,
+        webUrl,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '공유 링크를 만들지 못했습니다.';
+      showAlert('공유', message);
+    } finally {
+      setSharing(false);
+    }
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.bg }]}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
-        >
-          <Text style={[styles.backText, { color: colors.primary }]}>{'<'} 뒤로</Text>
-        </TouchableOpacity>
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
+          >
+            <Text style={[styles.backText, { color: colors.primary }]}>{'<'} 뒤로</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.shareButton, { borderColor: colors.border }]}
+            onPress={() => void handleShare()}
+            disabled={sharing}
+          >
+            {sharing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <>
+                <MaterialIcons name="share" size={18} color={colors.primary} />
+                <Text style={[styles.shareText, { color: colors.primary }]}>공유</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <View style={[styles.expenseSection, { backgroundColor: colors.surface }]}>
           {expense.imageUrl ? (
@@ -187,8 +240,24 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
   content: { padding: 16 },
-  backButton: { marginBottom: 8 },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  backButton: {},
   backText: { fontSize: 16, fontWeight: '600' },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  shareText: { fontSize: 14, fontWeight: '700' },
   heroImage: { width: '100%', height: 200, borderRadius: 8, marginBottom: 12 },
   expenseSection: { padding: 16, borderRadius: 8, marginBottom: 24 },
   itemLine: { fontSize: 17, fontWeight: '700', marginBottom: 8 },

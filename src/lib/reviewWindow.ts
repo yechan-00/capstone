@@ -15,15 +15,22 @@ export function computeReviewExpiresAt(spentAt: Date): Date {
   return new Date(computeReviewOpensAt(spentAt).getTime() + REVIEW_WINDOW_MS);
 }
 
-/** 리뷰가 열리는 날, 설정한 시각에 알림 */
-export function computeReviewNotificationAt(spentAt: Date, notificationTime?: string): Date {
-  const opens = computeReviewOpensAt(spentAt);
+/** 리뷰 오픈일(dueAt) + 설정 시각 → 알림 시각 */
+export function computeReviewNotificationAtFromOpensAt(
+  opensAt: Date,
+  notificationTime?: string,
+): Date {
   const [hourRaw, minuteRaw] = (notificationTime || '19:00').split(':');
   const hour = Number(hourRaw);
   const minute = Number(minuteRaw);
-  const d = new Date(opens);
+  const d = new Date(opensAt);
   d.setHours(Number.isNaN(hour) ? 19 : hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
   return d;
+}
+
+/** 리뷰가 열리는 날, 설정한 시각에 알림 */
+export function computeReviewNotificationAt(spentAt: Date, notificationTime?: string): Date {
+  return computeReviewNotificationAtFromOpensAt(computeReviewOpensAt(spentAt), notificationTime);
 }
 
 export function resolveScheduleExpiresAt(schedule: ReviewSchedule): Date {

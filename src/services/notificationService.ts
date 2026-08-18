@@ -4,10 +4,10 @@ import {
   getAllScheduledNotificationsAsync,
 } from "expo-notifications";
 import { Platform } from "react-native";
-import { addDays } from "date-fns";
+import { computeReviewNotificationAt } from '@/lib/reviewWindow';
 
-/** 신규 소비는 D+3 리뷰 알림만 스케줄 */
-export type ReviewScheduleTiming = "d3";
+/** 신규 소비는 소비 다음 날 리뷰 알림 스케줄 */
+export type ReviewScheduleTiming = "d1";
 
 export async function ensureNotificationPermission(): Promise<boolean> {
   // 웹은 로컬 알림 미지원 · API가 대기만 하고 끝나지 않는 경우가 있어 조기 종료
@@ -17,7 +17,6 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 
   // iOS는 권한이 반드시 필요
   const settings = await Notifications.getPermissionsAsync();
-  console.log("[notifications] permission settings:", settings);
   let granted =
     settings.granted ||
     settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
@@ -31,7 +30,6 @@ export async function ensureNotificationPermission(): Promise<boolean> {
       },
     });
 
-    console.log("[notifications] permission request result:", req);
     granted =
       req.granted ||
       req.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
@@ -40,7 +38,7 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   // Android는 채널 설정 권장 (알림 중요도 등)
   if (granted && Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("reviews", {
-      name: "3일 후 리뷰",
+      name: "리뷰 알림",
       importance: Notifications.AndroidImportance.DEFAULT,
     });
   }
@@ -114,14 +112,14 @@ const applyTime = (date: Date, time?: string): Date => {
 };
 
 /**
- * 후회 리마인더: 소비일 기준 3일 뒤, 계정에 설정한 알림 시각
+ * 후회 리마인더: 소비 다음 날(0시 오픈), 계정에 설정한 알림 시각
  */
 export function computeReviewReminderDueDates(
   spentAt: Date,
   notificationTime?: string
 ): Record<ReviewScheduleTiming, Date> {
   return {
-    d3: applyTime(addDays(spentAt, 3), notificationTime),
+    d1: computeReviewNotificationAt(spentAt, notificationTime),
   };
 }
 

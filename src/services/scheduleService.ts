@@ -23,6 +23,7 @@ import { isReviewWindowOpen, isReviewWindowExpired, isReviewEvaluable } from '@/
 import {
   computeReviewExpiresAt,
   computeReviewNotificationAt,
+  computeReviewNotificationAtFromOpensAt,
   computeReviewOpensAt,
 } from '@/lib/reviewWindow';
 import { cancelReminder, scheduleReviewReminder } from '@/services/notificationService';
@@ -440,6 +441,69 @@ export const scheduleService = {
    * 리뷰 예정일(dueAt) 이후에도 해당 스케줄의 주기(예: 3일)만큼 지나면 로컬 알림을 취소하고
    * Firestore의 notificationId만 비웁니다. (스케줄은 pending 유지 — 앱에서 리뷰는 계속 가능)
    */
+  /**
+   * 리뷰 알림 시각/ON-OFF 변경 시 pending 스케줄의 로컬 알림을 다시 예약합니다.
+   */
+  async reschedulePendingReviewNotifications(
+    accountId: string,
+    notificationTime: string,
+    enabled: boolean,
+  ): Promise<number> {
+    if (Platform.OS === 'web') {
+      return 0;
+    }
+
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('status', '==', 'pending'),
+        ),
+      );
+
+      let rescheduled = 0;
+      for (const snap of snapshot.docs) {
+        const schedule = mapScheduleDoc(snap);
+        const prevNotificationId = snap.data().notificationId as string | undefined;
+
+        if (prevNotificationId) {
+          await cancelReminder(prevNotificationId);
+        }
+
+        if (!enabled || isReviewWindowExpired(schedule)) {
+          if (prevNotificationId) {
+            await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId: null });
+          }
+          continue;
+        }
+
+        const notifyAt = computeReviewNotificationAtFromOpensAt(schedule.dueAt, notificationTime);
+        if (notifyAt.getTime() <= Date.now()) {
+          await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId: null });
+          continue;
+        }
+
+        const notificationId = await this.scheduleNotification(
+          schedule.expenseId,
+          notifyAt,
+          snap.id,
+        );
+        if (notificationId) {
+          await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId });
+          rescheduled += 1;
+        } else {
+          await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId: null });
+        }
+      }
+
+      return rescheduled;
+    } catch (error) {
+      console.warn('[schedule] reschedulePendingReviewNotifications', error);
+      return 0;
+    }
+  },
+
   async clearExpiredReviewReminderNotifications(accountId: string): Promise<void> {
     if (Platform.OS === 'web') {
       return;

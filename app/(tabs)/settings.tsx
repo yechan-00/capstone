@@ -22,10 +22,11 @@ import { ColorPickerModal } from '@/components/ColorPickerModal';
 import { useDebouncedEffect } from '@/hooks/useDebouncedEffect';
 import { SettingsCard } from '@/components/SettingsCard';
 import { SettingsRow } from '@/components/SettingsRow';
+import { ConfirmModal } from '@/components/ConfirmModal';
+import { CenterNoticeModal } from '@/components/CenterNoticeModal';
 import { Chip } from '@/components/Chip';
 import {
   DEFAULT_REVIEW_REMINDER_TIME,
-  resolveReviewDelayDays,
   resolveRegretPatternAlertEnabled,
   resolveReviewReminderEnabled,
   resolveReviewReminderTime,
@@ -35,16 +36,6 @@ import { disableRegretPatternAlerts } from '@/services/regretPatternAlertService
 import AlarmTimeWheel from '@/components/AlarmTimeWheel';
 
 type IncomeUnit = 'base' | 'man' | 'baekman';
-type ReviewDelayDay = 1 | 3 | 7;
-
-const REVIEW_DELAY_OPTIONS: ReviewDelayDay[] = [1, 3, 7];
-
-function normalizeDelayDays(days: (1 | 3 | 7 | 30)[]): ReviewDelayDay[] {
-  const filtered = days.filter((d): d is ReviewDelayDay => d === 1 || d === 3 || d === 7);
-  if (filtered.length === 0) return [3];
-  const pick = filtered.includes(3) ? 3 : filtered.sort((a, b) => a - b)[0];
-  return [pick];
-}
 
 function parseReminderTimeToDate(time: string): Date {
   const [hh, mm] = time.split(':');
@@ -63,12 +54,11 @@ function parseReminderTimeToDate(time: string): Date {
 export default function SettingsScreen() {
   const router = useRouter();
   const isFocusedRef = useRef(false);
-  const { user, account, logout, updateReviewReminderSettings, updateRegretPatternAlertSettings, updateReviewDelayDays, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
+  const { user, account, logout, updateReviewReminderSettings, updateRegretPatternAlertSettings, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
   const { colors, isDark, setDarkMode, accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset, animationsEnabled, setAnimationsEnabled } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
   const [regretPatternAlertEnabled, setRegretPatternAlertEnabled] = useState(true);
-  const [reviewDelayDays, setReviewDelayDays] = useState<ReviewDelayDay[]>([3]);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [accentExpanded, setAccentExpanded] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -100,6 +90,9 @@ export default function SettingsScreen() {
     account?.budgetPeriodMode === 'payday' ? 'payday' : 'calendar'
   );
   const [paydayDay, setPaydayDay] = useState(String(account?.paydayDayOfMonth ?? 25));
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const incomeInitRef = useRef(false);
   const foodBudgetInitRef = useRef(false);
   const budgetPeriodInitRef = useRef(false);
@@ -121,14 +114,7 @@ export default function SettingsScreen() {
     setTimeValue(parseReminderTimeToDate(t));
     setReviewReminderEnabled(resolveReviewReminderEnabled(account));
     setRegretPatternAlertEnabled(resolveRegretPatternAlertEnabled(account));
-    setReviewDelayDays((prev) => {
-      const next = normalizeDelayDays(resolveReviewDelayDays(account));
-      if (prev.length === next.length && prev[0] === next[0]) {
-        return prev;
-      }
-      return next;
-    });
-  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled, account?.regretPatternAlertEnabled, account?.reviewDelayDays]);
+  }, [account?.reviewReminderTime, account?.notificationTime, account?.reviewReminderEnabled, account?.regretPatternAlertEnabled]);
 
   useEffect(() => {
     if (!account) return;
@@ -184,8 +170,6 @@ export default function SettingsScreen() {
     return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
   };
 
-  const selectedDelayDay = reviewDelayDays[0] ?? 3;
-
   const handleAndroidTimeChange = (event: { type?: string }, selectedDate?: Date) => {
     setShowTimePicker(false);
     if (Platform.OS === 'android' && event.type === 'dismissed') {
@@ -235,23 +219,6 @@ export default function SettingsScreen() {
       setTimeout(() => setNotificationSaved(false), 2000);
     } catch {
       Alert.alert('후회 패턴 알림', '저장에 실패했습니다.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveReviewDelayDays = async (days: ReviewDelayDay[]) => {
-    try {
-      const accountDays = resolveReviewDelayDays(account);
-      if (accountDays.length === days.length && accountDays.every((v, i) => v === days[i])) {
-        return;
-      }
-      setSaving(true);
-      await updateReviewDelayDays(days);
-      setNotificationSaved(true);
-      setTimeout(() => setNotificationSaved(false), 2000);
-    } catch {
-      Alert.alert('리뷰 주기', '저장에 실패했습니다.');
     } finally {
       setSaving(false);
     }
@@ -401,13 +368,6 @@ export default function SettingsScreen() {
     void saveRegretPatternAlert(regretPatternAlertEnabled);
   }, [regretPatternAlertEnabled, account?.id], 500);
 
-  useDebouncedEffect(() => {
-    if (!isFocusedRef.current) return;
-    if (!account?.id) return;
-    if (!reminderInitRef.current) return;
-    void saveReviewDelayDays(reviewDelayDays);
-  }, [reviewDelayDays, account?.id], 500);
-
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -479,31 +439,6 @@ export default function SettingsScreen() {
           fontSize: 15,
           fontWeight: '700',
           color: colors.text,
-        },
-        delayRow: {
-          flexDirection: 'row',
-          gap: 8,
-        },
-        delayChip: {
-          flex: 1,
-          paddingVertical: 9,
-          borderRadius: 12,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
-          backgroundColor: colors.surfaceMuted,
-          alignItems: 'center',
-        },
-        delayChipActive: {
-          backgroundColor: colors.accentCta,
-          borderColor: colors.accentCta,
-        },
-        delayChipText: {
-          fontSize: 13,
-          fontWeight: '800',
-          color: colors.textSec,
-        },
-        delayChipTextActive: {
-          color: colors.onPrimary,
         },
         incomeBody: {
           padding: 16,
@@ -729,17 +664,22 @@ export default function SettingsScreen() {
   );
 
   const handleLogout = () => {
-    Alert.alert('로그아웃', '정말 로그아웃하시겠습니까?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '로그아웃',
-        style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/(tabs)');
-        },
-      },
-    ]);
+    setLogoutConfirmVisible(true);
+  };
+
+  const confirmLogout = async () => {
+    if (logoutBusy) return;
+    try {
+      setLogoutBusy(true);
+              await logout();
+              setLogoutConfirmVisible(false);
+              router.replace(Platform.OS === 'web' ? '/home' : '/(auth)/login');
+    } catch {
+      setLogoutConfirmVisible(false);
+      setLogoutError('로그아웃에 실패했습니다. 다시 시도해주세요.');
+    } finally {
+      setLogoutBusy(false);
+    }
   };
 
   const showSaveToast = savingIncome || saving || incomeSaved || notificationSaved;
@@ -1195,6 +1135,29 @@ export default function SettingsScreen() {
         <Text style={[styles.saveToastText, { color: colors.textSec }]}>{saveToastMessage}</Text>
       </View>
     ) : null}
+
+    <ConfirmModal
+      visible={logoutConfirmVisible}
+      title="로그아웃"
+      message="정말 로그아웃하시겠습니까?"
+      confirmLabel="로그아웃"
+      cancelLabel="취소"
+      destructive
+      loading={logoutBusy}
+      onConfirm={() => {
+        void confirmLogout();
+      }}
+      onCancel={() => {
+        if (!logoutBusy) setLogoutConfirmVisible(false);
+      }}
+    />
+
+    <CenterNoticeModal
+      visible={logoutError != null}
+      title="오류"
+      message={logoutError ?? ''}
+      onClose={() => setLogoutError(null)}
+    />
     </View>
   );
 }
