@@ -8,7 +8,7 @@ import { HomeText } from '@/components/home/HomeText';
 import { WEB_NO_TRANSLATE } from '@/components/home/homeWeb';
 
 const DONUT = [
-  { color: '#34C36F', pct: 36 },
+  { color: '#34785F', pct: 36 },
   { color: '#42A5F5', pct: 14 },
   { color: '#FFA726', pct: 22 },
   { color: '#EF5350', pct: 18 },
@@ -16,7 +16,7 @@ const DONUT = [
 ] as const;
 
 const CATEGORIES = [
-  { label: '식비', amount: '450,000', pct: '36%', color: '#34C36F' },
+  { label: '식비', amount: '450,000', pct: '36%', color: '#34785F' },
   { label: '교통', amount: '180,000', pct: '14%', color: '#42A5F5' },
   { label: '쇼핑', amount: '280,000', pct: '22%', color: '#FFA726' },
   { label: '문화/여가', amount: '220,000', pct: '18%', color: '#EF5350' },
@@ -49,8 +49,7 @@ function ProgressRing({ size, progress }: { size: number; progress: number }) {
           fill="none"
           strokeDasharray={`${dash} ${circumference}`}
           strokeLinecap="round"
-          rotation={-90}
-          origin={`${size / 2}, ${size / 2}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </Svg>
       <Text style={styles.ringPct}>{Math.round(progress * 100)}%</Text>
@@ -79,8 +78,7 @@ function DonutChart({ size }: { size: number }) {
             fill="none"
             strokeDasharray={`${dash} ${circumference}`}
             strokeLinecap="butt"
-            rotation={-90 + (offset / circumference) * 360}
-            origin={`${size / 2}, ${size / 2}`}
+            transform={`rotate(${-90 + (offset / circumference) * 360} ${size / 2} ${size / 2})`}
           />
         );
         offset += dash;

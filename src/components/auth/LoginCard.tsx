@@ -8,11 +8,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { BrandLogo } from '@/components/BrandLogo';
 import { AuthFormContainer } from '@/components/AuthFormContainer';
 import { AuthPasswordField, PASSWORD_LABEL } from '@/components/AuthPasswordField';
 import { AuthSubmitButton, webEnterKeyProps } from '@/components/AuthSubmitButton';
-import { AUTH } from '@/components/auth/authTheme';
+import { LOGIN_UI } from '@/components/auth/loginTheme';
+import { BRAND_NAME } from '@/constants/brand';
+import { useTheme } from '@/theme/ThemeContext';
 
 export type LoginCardProps = {
   email: string;
@@ -32,9 +33,13 @@ export type LoginCardProps = {
 function AuthTextLink({
   label,
   onPress,
+  color,
+  weight,
 }: {
   label: string;
   onPress: () => void;
+  color: string;
+  weight: '500' | '600';
 }) {
   const [hovered, setHovered] = useState(false);
   const isWeb = Platform.OS === 'web';
@@ -44,13 +49,16 @@ function AuthTextLink({
       onPress={onPress}
       onHoverIn={isWeb ? () => setHovered(true) : undefined}
       onHoverOut={isWeb ? () => setHovered(false) : undefined}
-      accessibilityRole="button"
-      style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={({ pressed }) => [styles.linkHit, { opacity: pressed ? 0.7 : 1 }]}
     >
       <Text
         style={[
           styles.link,
-          hovered && styles.linkHover,
+          { color, fontWeight: weight },
+          hovered && { opacity: 0.82 },
           isWeb && hovered && ({ textDecorationLine: 'underline' } as object),
         ]}
       >
@@ -75,6 +83,7 @@ export function LoginCard({
   onSignup,
   onForgotPassword,
 }: LoginCardProps) {
+  const { colors, isDark } = useTheme();
   const passwordRef = useRef<TextInput>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [guestHovered, setGuestHovered] = useState(false);
@@ -82,27 +91,40 @@ export function LoginCard({
   const noTranslateProps = isWeb ? ({ className: 'notranslate', translate: 'no' } as object) : {};
   const busy = loading || guestLoading;
 
+  const inputBg = colors.surface;
+  const inputBorder = colors.borderInput;
+  const fieldAppearance = {
+    borderColor: inputBorder,
+    borderFocusColor: LOGIN_UI.inputFocus,
+    backgroundColor: inputBg,
+    textColor: colors.text,
+    placeholderColor: colors.placeholder,
+    iconColor: colors.textSec,
+  };
+
   return (
     <View {...noTranslateProps} style={styles.wrap}>
-      <BrandLogo
-        iconSize={64}
-        labelSize={23}
-        layout="column"
-        tone="auth"
-        style={styles.brandBlock}
-      />
+      <View style={styles.brandBlock} accessibilityRole="header" accessibilityLabel={BRAND_NAME}>
+        <Text style={[styles.brandName, { color: isDark ? colors.text : LOGIN_UI.brandTitle }]}>
+          {BRAND_NAME}
+        </Text>
+        <Text style={[styles.brandTagline, { color: colors.textSec }]}>
+          소비를 기록하고, 후회를 줄여가세요.
+        </Text>
+      </View>
 
       <AuthFormContainer style={styles.form}>
+        <Text style={[styles.fieldLabel, { color: colors.text }]}>이메일</Text>
         <View
           style={[
             styles.inputWrap,
-            emailFocused && styles.inputWrapFocused,
+            { backgroundColor: inputBg, borderColor: emailFocused ? LOGIN_UI.inputFocus : inputBorder },
           ]}
         >
           <TextInput
-            style={styles.input}
-            placeholder="이메일"
-            placeholderTextColor={AUTH.placeholder}
+            style={[styles.input, { color: colors.text }]}
+            placeholder="이메일을 입력해 주세요"
+            placeholderTextColor={colors.placeholder}
             value={email}
             onChangeText={onEmailChange}
             autoCapitalize="none"
@@ -119,9 +141,12 @@ export function LoginCard({
           />
         </View>
 
+        <Text style={[styles.fieldLabel, styles.fieldLabelSpaced, { color: colors.text }]}>
+          {PASSWORD_LABEL}
+        </Text>
         <AuthPasswordField
           ref={passwordRef}
-          placeholder={PASSWORD_LABEL}
+          placeholder="비밀번호를 입력해 주세요"
           value={password}
           onChangeText={onPasswordChange}
           accessibilityLabel={PASSWORD_LABEL}
@@ -133,6 +158,7 @@ export function LoginCard({
           {...webEnterKeyProps(onLogin)}
           editable={!busy}
           variant="card"
+          appearance={fieldAppearance}
         />
 
         <AuthSubmitButton
@@ -141,14 +167,15 @@ export function LoginCard({
           disabled={guestLoading}
           onPress={onLogin}
           usePressable
-          brandHover
           style={styles.primaryBtn}
           textStyle={styles.primaryBtnText}
-          spinnerColor={AUTH.lime}
+          spinnerColor={LOGIN_UI.buttonText}
         />
 
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
+        <View style={styles.dividerRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+          <Text style={[styles.dividerText, { color: colors.textMuted }]}>또는</Text>
+          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
         </View>
 
         <Pressable
@@ -158,24 +185,48 @@ export function LoginCard({
           onHoverOut={isWeb ? () => setGuestHovered(false) : undefined}
           style={({ pressed }) => [
             styles.guestBtn,
-            guestHovered && !busy && styles.guestBtnHover,
+            {
+              backgroundColor: colors.surface,
+              borderColor: isDark ? colors.border : LOGIN_UI.guestBorder,
+            },
+            guestHovered && !busy && {
+              backgroundColor: isDark ? colors.surfaceMuted : LOGIN_UI.guestHoverBg,
+            },
             busy && styles.guestBtnDisabled,
-            !busy && pressed && { opacity: 0.92 },
+            !busy && pressed && { opacity: 0.88 },
           ]}
           accessibilityRole="button"
           accessibilityLabel="먼저 체험해보기"
+          accessibilityState={{ busy: guestLoading, disabled: busy }}
         >
           {guestLoading ? (
-            <ActivityIndicator color={AUTH.brand} />
+            <ActivityIndicator color={LOGIN_UI.guestText} />
           ) : (
-            <Text style={styles.guestBtnText}>먼저 체험해보기</Text>
+            <Text
+              style={[
+                styles.guestBtnText,
+                { color: isDark ? '#D5E8DE' : LOGIN_UI.guestText },
+              ]}
+            >
+              먼저 체험해보기
+            </Text>
           )}
         </Pressable>
 
         <View style={styles.links}>
-          <AuthTextLink label="회원가입" onPress={onSignup} />
-          <Text style={styles.linkDot}>·</Text>
-          <AuthTextLink label={`${PASSWORD_LABEL} 찾기`} onPress={onForgotPassword} />
+          <AuthTextLink
+            label="회원가입"
+            onPress={onSignup}
+            color={LOGIN_UI.signupLink}
+            weight="600"
+          />
+          <Text style={[styles.linkDot, { color: colors.textMuted }]}>·</Text>
+          <AuthTextLink
+            label={`${PASSWORD_LABEL} 찾기`}
+            onPress={onForgotPassword}
+            color={colors.textSec}
+            weight="500"
+          />
         </View>
       </AuthFormContainer>
     </View>
@@ -185,82 +236,99 @@ export function LoginCard({
 const styles = StyleSheet.create({
   wrap: {
     width: '100%',
-    maxWidth: AUTH.formWidth,
-    alignItems: 'center',
-    ...(Platform.OS === 'web' ? { marginTop: -12 } : {}),
+    maxWidth: LOGIN_UI.formWidth,
+    alignItems: 'stretch',
   },
   brandBlock: {
-    marginBottom: 36,
+    alignItems: 'center',
+    marginBottom: 32,
   },
-  form: { width: '100%', gap: 0 },
+  brandName: {
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    ...(Platform.OS === 'web' ? ({ userSelect: 'none' } as object) : {}),
+  },
+  brandTagline: {
+    marginTop: 8,
+    fontSize: 15,
+    fontWeight: '400',
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  form: { width: '100%' },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  fieldLabelSpaced: {
+    marginTop: 16,
+  },
   inputWrap: {
     borderWidth: 1,
-    borderColor: AUTH.inputBorder,
-    borderRadius: AUTH.radius,
-    backgroundColor: AUTH.inputBg,
-    height: AUTH.inputHeight,
+    borderRadius: LOGIN_UI.radius,
+    height: LOGIN_UI.inputHeight,
     paddingHorizontal: 16,
-    marginBottom: 14,
     justifyContent: 'center',
-    ...(Platform.OS === 'web'
-      ? ({ transition: 'border-color 0.15s ease, box-shadow 0.15s ease' } as object)
-      : {}),
-  },
-  inputWrapFocused: {
-    borderColor: AUTH.inputBorderFocus,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: `0 0 0 4px ${AUTH.focusRing}` } as object)
-      : {}),
   },
   input: {
     fontSize: 16,
-    color: AUTH.brand,
     paddingVertical: 0,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {}),
   },
   primaryBtn: {
-    marginTop: 2,
-    backgroundColor: AUTH.brand,
-    borderRadius: AUTH.radius,
-    height: AUTH.buttonHeight,
+    marginTop: 24,
+    backgroundColor: LOGIN_UI.buttonBg,
+    borderRadius: LOGIN_UI.radius,
+    height: LOGIN_UI.buttonHeight,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
   },
-  primaryBtnText: { fontSize: 16, fontWeight: '700', color: AUTH.lime },
-  dividerRow: { marginVertical: 22, alignItems: 'center', width: '100%' },
-  dividerLine: {
+  primaryBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: LOGIN_UI.buttonText,
+  },
+  dividerRow: {
+    marginTop: 22,
+    marginBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
     width: '100%',
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: AUTH.inputBorder,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    fontSize: 12,
+    fontWeight: '400',
   },
   guestBtn: {
-    height: AUTH.buttonHeight,
-    borderRadius: AUTH.radius,
+    height: LOGIN_UI.guestHeight,
+    borderRadius: LOGIN_UI.radius,
     borderWidth: 1,
-    borderColor: AUTH.guestBorder,
-    backgroundColor: 'rgba(255,255,255,0.8)',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    ...(Platform.OS === 'web'
-      ? ({ transition: 'background-color 0.15s ease, border-color 0.15s ease' } as object)
-      : {}),
   },
-  guestBtnHover: {
-    backgroundColor: AUTH.guestHoverBg,
-    borderColor: AUTH.guestBorderHover,
-  },
-  guestBtnDisabled: { opacity: 0.65 },
-  guestBtnText: { fontSize: 15, fontWeight: '700', color: AUTH.brand },
+  guestBtnDisabled: { opacity: 0.55 },
+  guestBtnText: { fontSize: 16, fontWeight: '600' },
   links: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 26,
+    gap: 10,
+    marginTop: 20,
   },
-  link: { fontSize: 14, fontWeight: '700', color: AUTH.textSub },
-  linkHover: { color: AUTH.brand },
-  linkDot: { fontSize: 14, color: AUTH.placeholder },
+  linkHit: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  link: { fontSize: 14 },
+  linkDot: { fontSize: 14, lineHeight: 44 },
 });

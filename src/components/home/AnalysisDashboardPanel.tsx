@@ -6,6 +6,7 @@ import { HomeText } from '@/components/home/HomeText';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'] as const;
 const BAR_HEIGHTS = [42, 38, 45, 50, 88, 92, 48];
+const TRACK_HEIGHT = 100;
 
 const EMOTIONS = [
   { label: '스트레스', value: 0.72 },
@@ -15,6 +16,8 @@ const EMOTIONS = [
   { label: '평온함', value: 0.09 },
 ] as const;
 
+const HEAT_ROWS = ['0h', '6h', '12h', '18h', '24h'];
+
 export function AnalysisDashboardPanel() {
   return (
     <View style={styles.root}>
@@ -23,65 +26,80 @@ export function AnalysisDashboardPanel() {
           <HomeText style={styles.panelTitle}>요일별 지출 패턴</HomeText>
           <View style={styles.chip}>
             <MaterialIcons name="north-east" size={12} color={HOME.neon} />
-            <HomeText style={styles.chipText}>금·토 42%↑</HomeText>
+            <HomeText style={styles.chipText}>지출 집중 요일</HomeText>
           </View>
         </View>
-        <View style={styles.barChart}>
-          {WEEKDAYS.map((day, i) => {
-            const peak = i === 4 || i === 5;
-            return (
-              <View key={day} style={styles.barCol}>
-                <View style={[styles.barTrack, { height: 100 }]}>
-                  <View
-                    style={[
-                      styles.barFill,
-                      {
-                        height: `${BAR_HEIGHTS[i]}%`,
-                        backgroundColor: peak ? HOME.neon : 'rgba(255,255,255,0.12)',
-                      },
-                    ]}
-                  />
+
+        <View style={styles.barChartWrap}>
+          <View style={styles.barTooltip}>
+            <MaterialIcons name="trending-up" size={12} color={HOME.neon} />
+            <HomeText style={styles.barTooltipText}>금-토요일에 평균 42% 더 사용해요</HomeText>
+          </View>
+          <View style={styles.barChart}>
+            {WEEKDAYS.map((day, i) => {
+              const peak = i === 4 || i === 5;
+              return (
+                <View key={day} style={styles.barCol}>
+                  <View style={[styles.barTrack, { height: TRACK_HEIGHT }]}>
+                    <View
+                      style={[
+                        styles.barFill,
+                        {
+                          height: (BAR_HEIGHTS[i] / 100) * TRACK_HEIGHT,
+                          backgroundColor: peak ? HOME.neon : 'rgba(255,255,255,0.12)',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <HomeText style={[styles.barLabel, peak && styles.barLabelActive]}>{day}</HomeText>
                 </View>
-                <HomeText style={[styles.barLabel, peak && styles.barLabelActive]}>{day}</HomeText>
-              </View>
-            );
-          })}
+              );
+            })}
+          </View>
         </View>
       </View>
 
       <View style={styles.bottomRow}>
         <View style={[styles.panel, styles.halfPanel]}>
-          <HomeText style={styles.panelTitle}>시간대별 지출</HomeText>
-          <View style={styles.heatmap}>
-            {Array.from({ length: 35 }).map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.heatCell,
-                  {
-                    opacity: 0.12 + ((i * 7) % 10) * 0.07 + (i > 20 ? 0.15 : 0),
-                    backgroundColor: HOME.neon,
-                  },
-                ]}
-              />
-            ))}
+          <HomeText style={styles.panelTitle}>시간대별 지출 패턴</HomeText>
+          <View style={styles.heatmapWrap}>
+            <View style={styles.heatmapYAxis}>
+              {HEAT_ROWS.map((label) => (
+                <HomeText key={label} style={styles.heatAxisLabel}>
+                  {label}
+                </HomeText>
+              ))}
+            </View>
+            <View style={styles.heatmapGrid}>
+              {Array.from({ length: 35 }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.heatCell,
+                    {
+                      opacity: 0.12 + ((i * 7) % 10) * 0.07 + (i > 20 ? 0.15 : 0),
+                      backgroundColor: HOME.neon,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
           </View>
-          <HomeText style={styles.heatCaption}>오후 9시~12시 피크</HomeText>
+          <HomeText style={styles.heatCaption}>오후 9시~12시 지출 피크 시간</HomeText>
         </View>
 
         <View style={[styles.panel, styles.halfPanel]}>
-          <HomeText style={styles.panelTitle}>감정별 상관도</HomeText>
+          <HomeText style={styles.panelTitle}>감정별 지출 상관도</HomeText>
           {EMOTIONS.map((row) => (
             <View key={row.label} style={styles.emotionRow}>
               <HomeText style={styles.emotionLabel}>{row.label}</HomeText>
               <View style={styles.emotionTrack}>
-                <View
-                  style={[styles.emotionFill, { width: `${row.value * 100}%` }]}
-                />
+                <View style={[styles.emotionFill, { width: `${row.value * 100}%` }]} />
               </View>
               <HomeText style={styles.emotionVal}>{row.value.toFixed(2)}</HomeText>
             </View>
           ))}
+          <HomeText style={styles.emotionFoot}>상관도 (높을수록 영향 큼)</HomeText>
         </View>
       </View>
     </View>
@@ -120,12 +138,26 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipText: { fontSize: 11, fontWeight: '800', color: HOME.neon },
+  barChartWrap: { position: 'relative', gap: 8 },
+  barTooltip: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(125,255,154,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  barTooltipText: { fontSize: 10, fontWeight: '700', color: HOME.neon },
   barChart: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 6,
-    paddingTop: 8,
+    paddingTop: 4,
   },
   barCol: { flex: 1, alignItems: 'center', gap: 8 },
   barTrack: {
@@ -141,7 +173,10 @@ const styles = StyleSheet.create({
   barLabelActive: { color: HOME.neon },
   bottomRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   halfPanel: { flex: 1, minWidth: 0 },
-  heatmap: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
+  heatmapWrap: { flexDirection: 'row', gap: 6 },
+  heatmapYAxis: { justifyContent: 'space-between', paddingVertical: 2 },
+  heatAxisLabel: { fontSize: 8, fontWeight: '600', color: 'rgba(255,255,255,0.35)' },
+  heatmapGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
   heatCell: { width: 12, height: 12, borderRadius: 2 },
   heatCaption: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.45)' },
   emotionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -155,4 +190,5 @@ const styles = StyleSheet.create({
   },
   emotionFill: { height: '100%', borderRadius: 999, backgroundColor: HOME.neon },
   emotionVal: { width: 32, fontSize: 10, fontWeight: '800', color: HOME.neon, textAlign: 'right' },
+  emotionFoot: { fontSize: 9, fontWeight: '600', color: 'rgba(255,255,255,0.35)', marginTop: 4 },
 });

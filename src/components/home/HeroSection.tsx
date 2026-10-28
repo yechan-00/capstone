@@ -34,7 +34,7 @@ const TRUST_ITEMS = [
   },
 ] as const;
 
-const AVATAR_COLORS = ['#34C36F', '#42A5F5', '#FFA726', '#AB47BC', '#26A69A', '#EF5350'] as const;
+const AVATAR_COLORS = ['#34785F', '#42A5F5', '#FFA726', '#AB47BC', '#26A69A', '#EF5350'] as const;
 
 type Props = {
   onExplore?: () => void;

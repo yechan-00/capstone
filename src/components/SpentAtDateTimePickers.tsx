@@ -23,6 +23,8 @@ type Props = {
   onChange: (next: Date) => void;
   textColor: string;
   themeVariant: 'light' | 'dark';
+  /** iOS inline 달력 선택/오늘/화살표 색. spinner에는 영향 없음. */
+  accentColor?: string;
 };
 
 /** phase='date' → 달력만 / phase='time' → 시간만. iOS는 inline 달력, Android는 calendar. */
@@ -32,6 +34,7 @@ export function SpentAtDateTimePickers({
   onChange,
   textColor,
   themeVariant,
+  accentColor,
 }: Props) {
   const locale = Platform.OS === 'ios' ? 'ko_KR' : undefined;
 
@@ -43,6 +46,7 @@ export function SpentAtDateTimePickers({
       locale={locale}
       themeVariant={themeVariant}
       textColor={textColor}
+      accentColor={accentColor}
       onChange={(_, d) => {
         if (!d) return;
         onChange(mergeDateKeepTime(value, d));
@@ -59,6 +63,7 @@ export function SpentAtDateTimePickers({
       locale={locale}
       themeVariant={themeVariant}
       textColor={textColor}
+      accentColor={accentColor}
       onChange={(_, d) => {
         if (d) onChange(mergeTimeKeepDate(value, d));
       }}

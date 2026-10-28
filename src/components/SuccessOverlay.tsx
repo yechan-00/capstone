@@ -3,7 +3,6 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, {
-  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -26,11 +25,6 @@ type Props = {
   onDone: () => void;
 };
 
-const TONE = {
-  positive: { ring: '#16a34a', bg: '#dcfce7', icon: 'check' as const },
-  regret: { ring: '#d97706', bg: '#fef3c7', icon: 'spa' as const },
-};
-
 export function SuccessOverlay({
   visible,
   tone = 'positive',
@@ -40,13 +34,14 @@ export function SuccessOverlay({
   autoMs = 1100,
   onDone,
 }: Props) {
-  const { animationsEnabled } = useTheme();
-  const palette = TONE[tone];
+  const { colors, isDark, animationsEnabled } = useTheme();
+  const mintFill = colors.choiceActiveBg;
+  const mintIcon = colors.primary;
+  const regretFill = isDark ? colors.surfaceMuted : '#F4F6F4';
+  const regretIcon = colors.textSec;
 
   const circleScale = useSharedValue(0);
   const iconScale = useSharedValue(0);
-  const ringScale = useSharedValue(0.5);
-  const ringOpacity = useSharedValue(0);
   const cardOpacity = useSharedValue(0);
 
   useEffect(() => {
@@ -55,24 +50,14 @@ export function SuccessOverlay({
     if (!animationsEnabled) {
       circleScale.value = 1;
       iconScale.value = 1;
-      ringScale.value = 1;
-      ringOpacity.value = 0;
       cardOpacity.value = 1;
     } else {
       circleScale.value = 0;
       iconScale.value = 0;
-      ringScale.value = 0.5;
-      ringOpacity.value = 0.55;
       cardOpacity.value = 0;
-
       cardOpacity.value = withTiming(1, { duration: 180 });
-      circleScale.value = withSpring(1, { damping: 11, stiffness: 140 });
-      iconScale.value = withDelay(
-        120,
-        withSpring(1, { damping: 9, stiffness: 160 }),
-      );
-      ringScale.value = withDelay(80, withTiming(1.9, { duration: 620, easing: Easing.out(Easing.cubic) }));
-      ringOpacity.value = withDelay(80, withTiming(0, { duration: 620, easing: Easing.out(Easing.cubic) }));
+      circleScale.value = withSpring(1, { damping: 14, stiffness: 160 });
+      iconScale.value = withDelay(80, withSpring(1, { damping: 12, stiffness: 180 }));
     }
 
     Haptics.notificationAsync(
@@ -99,10 +84,6 @@ export function SuccessOverlay({
 
   const circleStyle = useAnimatedStyle(() => ({ transform: [{ scale: circleScale.value }] }));
   const iconStyle = useAnimatedStyle(() => ({ transform: [{ scale: iconScale.value }] }));
-  const ringStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: ringScale.value }],
-    opacity: ringOpacity.value,
-  }));
   const cardStyle = useAnimatedStyle(() => ({ opacity: cardOpacity.value }));
 
   if (!visible) return null;
@@ -110,26 +91,41 @@ export function SuccessOverlay({
   return (
     <Modal visible={visible} transparent statusBarTranslucent onRequestClose={handleDismiss}>
       <Pressable
-        style={styles.backdrop}
+        style={[styles.backdrop, { backgroundColor: isDark ? 'rgba(11,15,14,0.72)' : 'rgba(26,46,36,0.38)' }]}
         onPress={mode === 'tap' ? handleDismiss : undefined}
         disabled={mode !== 'tap'}
       >
-        <Animated.View style={[styles.card, cardStyle]}>
-          <View style={styles.badgeWrap}>
-            <Animated.View
-              style={[styles.ring, { borderColor: palette.ring }, ringStyle]}
-              pointerEvents="none"
-            />
-            <Animated.View style={[styles.circle, { backgroundColor: palette.bg }, circleStyle]}>
-              <Animated.View style={iconStyle}>
-                <MaterialIcons name={palette.icon} size={44} color={palette.ring} />
-              </Animated.View>
+        <Animated.View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+            cardStyle,
+          ]}
+        >
+          <Animated.View
+            style={[
+              styles.circle,
+              { backgroundColor: tone === 'positive' ? mintFill : regretFill },
+              circleStyle,
+            ]}
+          >
+            <Animated.View style={iconStyle}>
+              <MaterialIcons
+                name={tone === 'positive' ? 'check' : 'spa'}
+                size={32}
+                color={tone === 'positive' ? mintIcon : regretIcon}
+              />
             </Animated.View>
-          </View>
+          </Animated.View>
 
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-          {mode === 'tap' ? <Text style={styles.tapHint}>탭하여 계속</Text> : null}
+          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+          {subtitle ? <Text style={[styles.subtitle, { color: colors.textSec }]}>{subtitle}</Text> : null}
+          {mode === 'tap' ? (
+            <Text style={[styles.tapHint, { color: colors.textMuted }]}>탭하여 계속</Text>
+          ) : null}
         </Animated.View>
       </Pressable>
     </Modal>
@@ -139,50 +135,35 @@ export function SuccessOverlay({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
   },
   card: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: '#ffffff',
-    borderRadius: 24,
-    paddingVertical: 32,
-    paddingHorizontal: 24,
+    maxWidth: 320,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 28,
+    paddingHorizontal: 22,
     alignItems: 'center',
     gap: 6,
   },
-  badgeWrap: {
-    width: 96,
-    height: 96,
+  circle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
-  ring: {
-    position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 3,
-  },
-  circle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: { fontSize: 19, fontWeight: '900', color: '#111827', textAlign: 'center' },
+  title: { fontSize: 18, fontWeight: '800', textAlign: 'center' },
   subtitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4b5563',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
     marginTop: 2,
   },
-  tapHint: { marginTop: 14, fontSize: 12, fontWeight: '700', color: '#9ca3af' },
+  tapHint: { marginTop: 12, fontSize: 12, fontWeight: '600' },
 });

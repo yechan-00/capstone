@@ -8,19 +8,23 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { LoginCard } from '@/components/auth/LoginCard';
 import { AuthScreenBackground } from '@/components/auth/AuthScreenBackground';
-import { AUTH } from '@/components/auth/authTheme';
+import { LOGIN_UI } from '@/components/auth/loginTheme';
 import { ForgotPasswordModal } from '@/components/auth/ForgotPasswordModal';
 import { CenterNoticeModal } from '@/components/CenterNoticeModal';
+import { useTheme } from '@/theme/ThemeContext';
 import { validateEmail, validatePassword } from '@/utils/validation';
 import { mapLoginAuthError, mapPasswordResetError } from '@/utils/firebaseAuthErrors';
 import * as authService from '@/services/authService';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { signIn, signInAsGuest } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -97,11 +101,15 @@ export default function LoginScreen() {
     [showNotice],
   );
 
+  const topPad = Math.max(insets.top, 16) + (isWeb ? 56 : 20);
+  const bottomPad = Math.max(insets.bottom, 16) + 12;
+
   return (
     <AuthScreenBackground>
       <KeyboardAvoidingView
         style={styles.root}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         {isWeb ? (
           <Pressable
@@ -110,18 +118,32 @@ export default function LoginScreen() {
             onHoverOut={() => setBackHovered(false)}
             style={({ pressed }) => [
               styles.backLink,
+              { top: Math.max(insets.top, 20) },
               pressed && { opacity: 0.75 },
             ]}
           >
-            <Text style={[styles.backLinkText, backHovered && styles.backLinkTextHover]}>
+            <Text
+              style={[
+                styles.backLinkText,
+                { color: backHovered ? LOGIN_UI.signupLink : colors.textSec },
+              ]}
+            >
               ← 홈으로
             </Text>
           </Pressable>
         ) : null}
 
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              paddingTop: topPad,
+              paddingBottom: bottomPad,
+              paddingHorizontal: LOGIN_UI.horizontalPad,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.formSlot}>
@@ -170,31 +192,23 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'web' ? 72 : 48,
-    paddingBottom: 48,
-    minHeight: Platform.OS === 'web' ? ('100vh' as unknown as number) : undefined,
   },
   formSlot: {
     width: '100%',
-    maxWidth: AUTH.formWidth,
-    alignItems: 'center',
+    maxWidth: LOGIN_UI.formWidth,
+    alignItems: 'stretch',
   },
   backLink: {
     position: 'absolute',
-    top: 28,
-    left: 28,
+    left: 24,
     zIndex: 10,
-    paddingVertical: 6,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 4,
   },
   backLinkText: {
     fontSize: 14,
-    fontWeight: '700',
-    color: AUTH.textSub,
+    fontWeight: '600',
     ...(Platform.OS === 'web' ? ({ transition: 'color 0.15s ease' } as object) : {}),
-  },
-  backLinkTextHover: {
-    color: AUTH.brand,
   },
 });

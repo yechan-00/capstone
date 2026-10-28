@@ -64,7 +64,7 @@ export function LandingCTASection() {
           </View>
 
           <RevealSection delay={120} style={styles.phoneCol}>
-            <PhoneFrame screen="insights" size="compact" rotate={isMobile ? 0 : 4} />
+            <PhoneFrame screen="regret-index" size="compact" rotate={isMobile ? 0 : 4} lightBezel />
           </RevealSection>
 
           <RevealSection delay={180} style={isMobile ? styles.proofColMobileFull : styles.proofCol}>

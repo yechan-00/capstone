@@ -84,13 +84,18 @@ export interface Expense {
   content?: string;
   category: ExpenseCategory;
   reason: string;
-  mood: ExpenseMood;
+  mood?: ExpenseMood;
   tags: string[];
   /** 한줄평 (식후 기록용) */
   summaryLine?: string;
   summaryEmoji?: string;
-  /** Firebase Storage URL */
+  /** R2 Worker 조회 URL(토큰 포함). 레거시는 Firebase Storage URL일 수 있음. 대표 사진 */
   imageUrl?: string | null;
+  /**
+   * 신규 소비의 사진 URL 0~5장. 없으면 기존 imageUrl만 사용한다.
+   * 기존 문서에 빈 배열을 채우지 않는다.
+   */
+  imageUrls?: string[];
   spentAt: Date;
   sourceType: ExpenseSourceType;
   sourceRef?: string | null; // 카드명, 계좌명 등
@@ -163,6 +168,8 @@ export interface ReviewSchedule {
 export interface CategoryInsight {
   category: ExpenseCategory;
   totalCount: number;
+  /** 기간 내 해당 카테고리 소비 금액 합계 */
+  totalAmountKrw: number;
   regretCount: number;
   regretRate: number;
 }
@@ -187,6 +194,16 @@ export interface WeekdayInsight {
   totalCount: number;
   regretCount: number;
   regretRate: number;
+}
+
+/** 요일 × 시간대 교차 후회 집계 (후회율 = 후회 / 기록 × 100) */
+export interface WeekdayTimeCell {
+  weekday: number;
+  timeOfDay: 'morning' | 'afternoon' | 'evening' | 'night';
+  totalCount: number;
+  regretCount: number;
+  regretRate: number;
+  totalAmountKrw: number;
 }
 
 /** 후회 패턴 예방 알림 슬롯 (요일/시간) */
@@ -234,6 +251,13 @@ export interface FoodBudgetInsight {
   savingsPercentile: number | null;
 }
 
+export interface RegretPeriodSnapshot {
+  overallRegretRate: number;
+  totalExpenses: number;
+  totalRegrets: number;
+  totalReviews: number;
+}
+
 export interface Insights {
   period: {
     start: Date;
@@ -244,6 +268,8 @@ export interface Insights {
   moodInsights: MoodInsight[];
   timeOfDayInsights: TimeOfDayInsight[];
   weekdayInsights: WeekdayInsight[];
+  /** 요일×시간대 후회 heatmap 셀 (28개) */
+  weekdayTimeInsights: WeekdayTimeCell[];
   /** spentAt 기준 요일별 소비 건수. 인덱스 0=일 … 6=토 (Date.getDay) */
   weekdayExpenseCounts: number[];
   /** spentAt 기준 요일별 카테고리 건수 (delivery/cafe/takeout). 인덱스 0=일 … 6=토 */
@@ -252,6 +278,16 @@ export interface Insights {
   totalSpendKrw: number;
   totalRegrets: number;
   overallRegretRate: number;
+  /** 기간 내 리뷰 완료 건수 */
+  totalReviews: number;
+  /** 후회 리뷰에 연결된 expense amount 합 (중복 제외) */
+  regretAmountKrw: number;
+  /** 직전 월/연 스냅샷. 데이터 없으면 null */
+  previousPeriod: RegretPeriodSnapshot | null;
+  /** 직전 기간 카테고리별 소비 금액. 직전 기간 소비 없으면 null */
+  previousCategoryAmounts: Record<'takeout' | 'delivery' | 'cafe', number> | null;
+  /** 후회율 추이 (%). 버킷 데이터 부족 시 null. 리뷰 없는 버킷은 null */
+  regretTrendRates: Array<number | null> | null;
   /** 월 수입 미설정 시 null */
   incomeInsight: IncomeInsight | null;
   /** 식비 예산 미설정 시 null */

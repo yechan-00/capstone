@@ -2,14 +2,26 @@ import React from 'react';
 import { Pressable, Text, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from '@/theme/ThemeContext';
 
-export function PrimaryButton({ label, onPress, disabled, style }: { label: string; onPress: () => void; disabled?: boolean; style?: ViewStyle }) {
+export function PrimaryButton({
+  label,
+  onPress,
+  disabled,
+  style,
+  textColor,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  style?: ViewStyle;
+  textColor?: string;
+}) {
   const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress} disabled={disabled}
       style={({ pressed }) => [styles.base, { backgroundColor: colors.accentCta }, disabled && styles.disabled, pressed && !disabled && styles.pressed, style]}
     >
-      <Text style={[styles.text, { color: colors.onPrimary }]}>{label}</Text>
+      <Text style={[styles.text, { color: textColor ?? colors.onPrimary }]}>{label}</Text>
     </Pressable>
   );
 }

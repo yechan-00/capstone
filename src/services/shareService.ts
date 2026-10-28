@@ -58,6 +58,17 @@ function toGuestComment(id: string, data: Record<string, unknown>): GuestComment
 }
 
 export const shareService = {
+  async findShareTokenForExpense(expenseId: string, userId: string): Promise<string | null> {
+    const existing = await getDocs(
+      query(collection(db, SHARES), where('expenseId', '==', expenseId), limit(8)),
+    );
+    const matched = existing.docs.find((d) => {
+      const data = d.data();
+      return data.createdByUserId === userId && data.active !== false;
+    });
+    return matched?.id ?? null;
+  },
+
   async getOrCreateExpenseShare(input: {
     expenseId: string;
     accountId: string;

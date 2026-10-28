@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -12,7 +11,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,47 +27,50 @@ import { Chip } from '@/components/Chip';
 import { AppCard } from '@/components/AppCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SpentAtDateTimePickers } from '@/components/SpentAtDateTimePickers';
-import { CATEGORIES, MOODS, QUICK_AMOUNTS, REASON_GROUPS, CategoryKey } from '@/lib/expenseOptions';
-import { ExpenseMood } from '@/lib/types';
+import { CATEGORIES, CategoryKey } from '@/lib/expenseOptions';
+import {
+  ADD_STEP_BAR_LABELS,
+  ADD_STEPS,
+  LAST_STEP,
+  MEAL_TAG_PRESETS,
+  QUICK_AMOUNTS_STEP,
+  REASON_CHIP_ROWS,
+  TAG_PRESETS,
+  formatAmountInput,
+  formatExpenseFormDateTime as formatDateTime,
+  parseAmount,
+  toKoreanMoney,
+  unformat,
+} from '@/lib/expenseForm';
 import { scanReceiptImage } from '@/services/geminiService';
 import { buildManualExpensePayload } from '@/services/expenseInput/manualExpensePayload';
 import { scanResultToFormPatch, type ScanFormPatch } from '@/services/expenseInput/fromScanResult';
 import { parsePastedExpenseText } from '@/services/expenseInput/fromPastedText';
-import { uploadExpenseImage } from '@/services/storageService';
+import {
+  getR2ImageApiBaseUrl,
+  saveEditedExpensePhotos,
+} from '@/services/storageService';
+import {
+  cloneEditablePhotos,
+  editablePhotosFromExpense,
+  expenseHasImageUrlsField,
+  localEditablePhotos,
+  mergeEditableExpensePhotos,
+  remainingEditablePhotoSlots,
+  removeEditableExpensePhoto,
+  setCoverEditableExpensePhoto,
+  type EditableExpensePhoto,
+} from '@/utils/editableExpensePhotos';
+import { MAX_EXPENSE_PHOTOS } from '@/utils/pendingExpensePhotos';
+import { ExpensePhotoStrip } from '@/components/expenseForm/ExpensePhotoStrip';
 import { scheduleRiskAwarenessAfterExpense } from '@/services/riskSpendingNotification';
 import { useTheme } from '@/theme/ThemeContext';
+import { expenseFormStyles } from '@/theme/expenseFormStyles';
 import {
   amountKeyboardProps,
   koreanTextInputProps,
   useIosKoreanFieldTransition,
 } from '@/lib/koreanTextInput';
-
-const MEAL_TAG_PRESETS = ['아침', '점심', '저녁'] as const;
-const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
-
-const ADD_STEPS = ['금액·유형', '시간·사진', '이유·기분', '확인'] as const;
-/** 상단 스텝 바: 한 줄용 짧은 라벨 */
-const ADD_STEP_BAR_LABELS = ['금액', '시간·사진', '이유·기분', '확인'] as const;
-const LAST_STEP = ADD_STEPS.length - 1;
-/** +2만(20000) 칩은 한 줄에 초기화까지 넣기 위해 제외 */
-const QUICK_AMOUNTS_STEP = QUICK_AMOUNTS.filter((v) => v !== 20000);
-const PHOTO_PREVIEW_MAX_HEIGHT = 320;
-const REASON_CHIP_ROWS = [
-  REASON_GROUPS[0].items.slice(0, 4),
-  REASON_GROUPS[0].items.slice(4),
-] as const;
-
-/** 원본 비율 유지하며 박스 안에 전체가 들어가도록 크기 계산 */
-function fitImageInBox(srcW: number, srcH: number, maxW: number, maxH: number) {
-  if (srcW <= 0 || srcH <= 0) return { width: maxW, height: Math.min(maxH, maxW * 0.75) };
-  let width = maxW;
-  let height = (srcH / srcW) * width;
-  if (height > maxH) {
-    height = maxH;
-    width = (srcW / srcH) * height;
-  }
-  return { width: Math.round(width), height: Math.round(height) };
-}
 
 export default function EditExpenseScreen() {
   const router = useRouter();
@@ -79,15 +80,9 @@ export default function EditExpenseScreen() {
   const { updateExpense } = useExpenses();
   const [loaded, setLoaded] = React.useState(false);
   const { colors, isDark } = useTheme();
-  const { width: windowWidth } = useWindowDimensions();
   const amountRef = useRef<TextInput>(null);
   const itemRef = useRef<TextInput>(null);
   const { markFromFocused, handleKoreanFieldFocus } = useIosKoreanFieldTransition(amountRef);
-  /** 카드 좌우 패딩·액센트 바 제외한 미리보기 최대 너비 */
-  const photoPreviewMaxWidth = windowWidth - 56;
-  const [photoPreviewSize, setPhotoPreviewSize] = useState<{ width: number; height: number } | null>(
-    null,
-  );
 
   const [amountText, setAmountText] = useState('');
   const amount = useMemo(() => parseAmount(amountText), [amountText]);
@@ -97,16 +92,18 @@ export default function EditExpenseScreen() {
   const [customReason, setCustomReason] = useState('');
   const [reasonDetail, setReasonDetail] = useState('');
   const [step, setStep] = useState(0);
-  const [mood, setMood] = useState<(typeof MOODS)[number]['key'] | null>(null);
   const [item, setItem] = useState('');
   const [summaryLine, setSummaryLine] = useState('');
   const [tagsText, setTagsText] = useState('');
-  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<EditableExpensePhoto[]>([]);
+  const originalPhotosRef = useRef<EditableExpensePhoto[]>([]);
+  const hadImageUrlsFieldRef = useRef(false);
   const [spentAt, setSpentAt] = useState(new Date());
   const [tempSpentAt, setTempSpentAt] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerPhase, setDatePickerPhase] = useState<'date' | 'time'>('date');
   const [saving, setSaving] = useState(false);
+  const savingLockRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteBuffer, setPasteBuffer] = useState('');
@@ -121,9 +118,12 @@ export default function EditExpenseScreen() {
       setReasonDetail(expense.reason ?? '');
       setSummaryLine(expense.summaryLine ?? '');
       setTagsText((expense.tags ?? []).join(', '));
-      setMood((expense.mood as any) ?? null);
       setSpentAt(expense.spentAt ?? new Date());
       setTempSpentAt(expense.spentAt ?? new Date());
+      const loadedPhotos = editablePhotosFromExpense(expense);
+      originalPhotosRef.current = cloneEditablePhotos(loadedPhotos);
+      hadImageUrlsFieldRef.current = expenseHasImageUrlsField(expense);
+      setPhotos(loadedPhotos);
       setLoaded(true);
     });
   }, [id]);
@@ -237,6 +237,10 @@ export default function EditExpenseScreen() {
   };
 
   const handleAttachPhoto = async () => {
+    if (savingLockRef.current) return;
+    const remaining = remainingEditablePhotoSlots(photos);
+    if (remaining <= 0) return;
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('사진 권한 필요', '설정에서 사진 접근 권한을 허용해 주세요.');
@@ -244,11 +248,35 @@ export default function EditExpenseScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      orderedSelection: true,
+      quality: 1,
     });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setLocalImageUri(result.assets[0].uri);
+    if (result.canceled) return;
+
+    const incoming: EditableExpensePhoto[] = (result.assets ?? [])
+      .filter((asset) => typeof asset.uri === 'string' && asset.uri.length > 0)
+      .map((asset) => ({
+        id: asset.assetId || asset.uri,
+        kind: 'local' as const,
+        uri: asset.uri,
+      }));
+    if (incoming.length === 0) return;
+    if (incoming.length > remaining) {
+      Alert.alert('사진 제한', '사진은 최대 5장까지 추가할 수 있어요.');
     }
+    setPhotos((current) => mergeEditableExpensePhotos(current, incoming));
+  };
+
+  const handleRemovePhoto = (id: string) => {
+    if (savingLockRef.current) return;
+    setPhotos((current) => removeEditableExpensePhoto(current, id));
+  };
+
+  const handleSetCoverPhoto = (id: string) => {
+    if (savingLockRef.current) return;
+    setPhotos((current) => setCoverEditableExpensePhoto(current, id));
   };
 
   const toggleMealTag = (tag: (typeof MEAL_TAG_PRESETS)[number]) => {
@@ -326,45 +354,16 @@ export default function EditExpenseScreen() {
     setTempSpentAt(next);
   };
 
-  const formatDateTime = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
-  };
-
   React.useEffect(() => {
     if (step !== 0) return undefined;
     const t = setTimeout(() => amountRef.current?.focus(), 150);
     return () => clearTimeout(t);
   }, [step]);
 
-  useEffect(() => {
-    if (!localImageUri) {
-      setPhotoPreviewSize(null);
-      return;
-    }
-    Image.getSize(
-      localImageUri,
-      (w, h) => {
-        setPhotoPreviewSize(fitImageInBox(w, h, photoPreviewMaxWidth, PHOTO_PREVIEW_MAX_HEIGHT));
-      },
-      () => setPhotoPreviewSize(fitImageInBox(4, 3, photoPreviewMaxWidth, PHOTO_PREVIEW_MAX_HEIGHT)),
-    );
-  }, [localImageUri, photoPreviewMaxWidth]);
-
   const categoryLabel = useMemo(
     () => CATEGORIES.find((c) => c.key === category)?.label ?? category,
     [category],
   );
-
-  const moodLabel = useMemo(() => {
-    if (!mood) return '선택 없음 → 저장 시「보통」으로 기록';
-    const m = MOODS.find((x) => x.key === mood);
-    return m ? `${m.emoji} ${m.label}` : mood;
-  }, [mood]);
 
   const reasonPreview = useMemo(() => {
     const chipPart =
@@ -401,6 +400,8 @@ export default function EditExpenseScreen() {
       Alert.alert('입력 확인', '금액과 카테고리를 입력해 주세요.');
       return;
     }
+    if (savingLockRef.current) return;
+    savingLockRef.current = true;
 
     try {
       setSaving(true);
@@ -420,20 +421,17 @@ export default function EditExpenseScreen() {
           : '';
       const resolvedReason =
         [chipPart, reasonDetail.trim()].filter(Boolean).join(' · ') || '기록 없음';
-      const resolvedMood = (mood ?? 'normal') as ExpenseMood;
 
       const payload = buildManualExpensePayload({
         amount,
         category,
         item: item.trim(),
         reason: resolvedReason,
-        mood: resolvedMood,
         tags,
         spentAt,
         sourceType: 'manual',
         sourceRef: null,
         summaryLine: summaryLine.trim() || undefined,
-        imageUrl: null,
       });
 
       await updateExpense(id, {
@@ -441,7 +439,6 @@ export default function EditExpenseScreen() {
         category: payload.category,
         item: payload.item,
         reason: payload.reason,
-        mood: payload.mood,
         tags: payload.tags,
         spentAt: payload.spentAt,
         summaryLine: payload.summaryLine,
@@ -458,12 +455,36 @@ export default function EditExpenseScreen() {
         account,
       });
 
-      if (user?.uid && localImageUri) {
-        try {
-          const url = await uploadExpenseImage(user.uid, expenseId, localImageUri);
-          await updateExpense(expenseId, { imageUrl: url });
-        } catch (err) {
-          console.warn('[expense] image upload failed', err);
+      const locals = localEditablePhotos(photos);
+      if (locals.length > 0 && !getR2ImageApiBaseUrl()) {
+        Alert.alert(
+          '사진 서버 없음',
+          '다른 수정은 저장됐어요. 사진은 EXPO_PUBLIC_R2_IMAGE_API_URL 설정 후 다시 올려 주세요. 기존 사진은 그대로 두었어요.',
+        );
+      } else {
+        const photoResult = await saveEditedExpensePhotos(
+          user?.uid ?? null,
+          expenseId,
+          photos,
+          originalPhotosRef.current,
+          hadImageUrlsFieldRef.current,
+          updateExpense,
+        );
+        if (photoResult.status === 'kept-original') {
+          Alert.alert(
+            '사진 저장 실패',
+            '새 사진을 올리지 못해서 기존 사진 목록을 그대로 두었어요. 금액 등 다른 수정은 저장됐어요.',
+          );
+        } else if (photoResult.status === 'saved' && !photoResult.persisted) {
+          Alert.alert(
+            '사진 연결 실패',
+            '사진은 일부 올라갔을 수 있지만 기록에 연결하지 못했어요. 기존 사진 정보는 그대로입니다. 다른 수정은 저장됐어요.',
+          );
+        } else if (photoResult.status === 'saved' && photoResult.failedLocalCount > 0) {
+          Alert.alert(
+            '일부 사진 저장 실패',
+            `새 사진 ${photoResult.totalLocal}장 중 ${photoResult.totalLocal - photoResult.failedLocalCount}장만 저장했어요. 기존 사진과 성공한 사진만 반영됐어요.`,
+          );
         }
       }
 
@@ -473,6 +494,7 @@ export default function EditExpenseScreen() {
       Alert.alert('저장 실패', `저장하지 못했어요. 오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally {
       setSaving(false);
+      savingLockRef.current = false;
     }
   };
 
@@ -761,49 +783,60 @@ export default function EditExpenseScreen() {
               >
                 <Text style={[styles.dateButtonText, { color: colors.text }]}>{formatDateTime(spentAt)}</Text>
               </Pressable>
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>사진</Text>
-              <View style={styles.photoAttachRow}>
+              <View style={styles.addSectionLabelRow}>
+                <Text style={[styles.labelThemed, { color: colors.textMuted }]}>사진</Text>
+                <Text style={[styles.addPhotoCount, { color: colors.textSec }]}>
+                  {photos.length}/{MAX_EXPENSE_PHOTOS}장
+                </Text>
+              </View>
+              <Text style={[styles.addPhotoGuide, { color: colors.textMuted }]}>
+                사진은 최대 5장까지 추가할 수 있어요.
+              </Text>
+              <Text style={[styles.addPhotoGuide, { color: colors.textMuted }]}>
+                첫 번째 사진이 홈과 목록에 표시돼요.
+              </Text>
+              {photos.length === 0 ? (
                 <Pressable
-                  style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
+                  style={({ pressed }) => [
+                    styles.addPhotoEmpty,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.surfaceMuted,
+                      opacity: saving ? 0.6 : pressed ? 0.94 : 1,
+                    },
+                  ]}
                   onPress={handleAttachPhoto}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 추가"
                 >
-                  <MaterialIcons name="photo-library" size={16} color={colors.textSec} />
-                  <Text style={[styles.attachButtonText, { color: colors.text }]}>
-                    {localImageUri ? '사진 바꾸기' : '갤러리에서 첨부'}
+                  <MaterialIcons name="photo-library" size={22} color={colors.textMuted} />
+                  <Text style={[styles.addPhotoEmptyTitle, { color: colors.text }]}>사진 추가</Text>
+                  <Text style={[styles.addPhotoEmptyHint, { color: colors.textMuted }]}>
+                    선택 사항 · 여러 장 선택 가능
                   </Text>
                 </Pressable>
-                {localImageUri ? (
-                  <Pressable
-                    style={[styles.photoDeleteBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                    onPress={() => setLocalImageUri(null)}
-                    accessibilityRole="button"
-                    accessibilityLabel="첨부 사진 삭제"
-                  >
-                    <Text style={[styles.clearPhoto, { color: colors.logoutText }]}>삭제</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-              {localImageUri ? (
-                <View
-                  style={[
-                    styles.photoPreviewWrap,
-                    { borderColor: colors.border, backgroundColor: colors.surfaceMuted },
-                  ]}
-                >
-                  {photoPreviewSize ? (
-                    <Image
-                      source={{ uri: localImageUri }}
-                      style={{
-                        width: photoPreviewSize.width,
-                        height: photoPreviewSize.height,
-                      }}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <ActivityIndicator size="small" color={colors.primary} style={styles.photoPreviewLoading} />
-                  )}
-                </View>
-              ) : null}
+              ) : (
+                <ExpensePhotoStrip
+                  photos={photos}
+                  saving={saving}
+                  onAdd={handleAttachPhoto}
+                  onRemove={handleRemovePhoto}
+                  onSetCover={handleSetCoverPhoto}
+                  colors={{
+                    border: colors.border,
+                    surface: colors.surface,
+                    surfaceMuted: colors.surfaceMuted,
+                    text: colors.text,
+                    textMuted: colors.textMuted,
+                    textSecondary: colors.textSec,
+                    accent: colors.accentCta,
+                    accentText: colors.primary,
+                    onAccent: colors.onPrimary,
+                    danger: colors.logoutText,
+                  }}
+                />
+              )}
             </View>
           </View>
         ) : null}
@@ -821,7 +854,7 @@ export default function EditExpenseScreen() {
               <View style={styles.stepTitleRow}>
                 <View style={styles.stepTitleMain}>
                   <Text style={[styles.contextKicker, { color: colors.textMuted }]}>3단계</Text>
-                  <Text style={[styles.contextTitle, { color: colors.text, marginTop: 2 }]}>이유 · 기분</Text>
+                  <Text style={[styles.contextTitle, { color: colors.text, marginTop: 2 }]}>소비 이유</Text>
                 </View>
                 <Text style={[styles.contextHintRight, { color: colors.textMuted }]}>
                   모두 선택{'\n'}건너뛰기 가능
@@ -884,23 +917,6 @@ export default function EditExpenseScreen() {
                     },
                   ]}
                 />
-              </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>당시 기분</Text>
-                <View style={styles.equalChipRow}>
-                  {MOODS.map((m) => (
-                    <Chip
-                      key={m.key}
-                      compact
-                      soft
-                      style={[styles.equalChipCell, styles.softChipCell]}
-                      label={m.label}
-                      active={mood === m.key}
-                      onPress={() => setMood(mood === m.key ? null : m.key)}
-                    />
-                  ))}
-                </View>
               </View>
 
               <View style={styles.fieldBlock}>
@@ -1000,10 +1016,6 @@ export default function EditExpenseScreen() {
               <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
                 <Text style={[styles.confirmKey, { color: colors.textMuted }]}>이유</Text>
                 <Text style={[styles.confirmVal, { color: colors.textSec }]}>{reasonPreview}</Text>
-              </View>
-              <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.confirmKey, { color: colors.textMuted }]}>기분</Text>
-                <Text style={[styles.confirmVal, { color: colors.textSec }]}>{moodLabel}</Text>
               </View>
               {summaryLine.trim() ? (
                 <View style={[styles.confirmRow, { borderBottomColor: colors.border }]}>
@@ -1211,462 +1223,27 @@ export default function EditExpenseScreen() {
   );
 }
 
-function parseAmount(raw: string) {
-  const cleaned = raw.replace(/[^\d]/g, '');
-  if (!cleaned) return 0;
-  return Number(cleaned);
-}
-
-function unformat(s: string) {
-  return s.replace(/[^\d]/g, '');
-}
-
-function formatAmountInput(s: string) {
-  const n = parseAmount(s);
-  if (!s) return '';
-  return n.toLocaleString();
-}
-
-function toKoreanMoney(v: number) {
-  if (v >= 10000) return `${v / 10000}만`;
-  return `${v.toLocaleString()}`;
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  container: { flex: 1 },
-  screenHeader: {
-    overflow: 'hidden',
-    zIndex: 10,
-    ...Platform.select({
-      android: { elevation: 8 },
-      default: {},
-    }),
-  },
-  screenHeaderInner: { paddingHorizontal: 14, paddingBottom: 14 },
-  pageBody: {
-    flex: 1,
-    marginTop: 8,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#0f172a',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-      },
-      android: { elevation: 6 },
-      default: {},
-    }),
-  },
-  pageBodyInner: { flex: 1 },
-  stepStripOnHeader: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    borderRadius: 12,
-    padding: 4,
-    gap: 2,
-    marginTop: 10,
-  },
-  content: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 20, gap: 12 },
-  contentNoScroll: { flexGrow: 1, justifyContent: 'flex-start' },
-  h1: { fontSize: 17, fontWeight: '900' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  headerActionText: { fontSize: 11, fontWeight: '800' },
-
-  label: { fontSize: 13, fontWeight: '900', color: '#6B7280', marginBottom: 8 },
-  amountInput: {
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#111827',
-  },
-
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '900', color: '#111827' },
-  sectionTitleSmall: { fontSize: 14, fontWeight: '900', color: '#6B7280' },
-  timingTitle: { fontWeight: '900', fontSize: 13, marginBottom: 4 },
-  timingBody: { fontWeight: '600', fontSize: 11, lineHeight: 16 },
-  fieldHint: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-
-  categoryRowCompact: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    maxWidth: '32%',
-    flexGrow: 1,
-  },
-  categoryPillActive: {
-    borderColor: '#77A7FF',
-    backgroundColor: '#E8F1FF',
-  },
-  categoryPillEmoji: { fontSize: 14 },
-  categoryPillText: { fontWeight: '800', color: '#111827', fontSize: 12, flexShrink: 1 },
-  categoryPillTextActive: { color: '#1D4ED8' },
-
-  // 기존 grid 스타일 (하위호환)
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  gridItem: {
-    width: '31%', minHeight: 72, backgroundColor: '#fff',
-    borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB',
-    alignItems: 'center', justifyContent: 'center', gap: 6,
-  },
-  gridItemActive: { borderColor: '#77A7FF', backgroundColor: '#E8F1FF' },
-  gridEmoji: { fontSize: 22 },
-  gridText: { fontWeight: '900', color: '#111827', fontSize: 13 },
-  gridTextActive: { color: '#1D4ED8' },
-
-  moreToggle: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 14,
-    alignItems: 'center',
-  },
-  moreText: { fontWeight: '900', color: '#2563EB' },
-
-  contextCardShell: {
-    flexDirection: 'row',
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  contextCardShadow: Platform.select({
-    ios: {
-      shadowColor: '#0f172a',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.07,
-      shadowRadius: 18,
+const styles = {
+  ...expenseFormStyles,
+  ...StyleSheet.create({
+    confirmRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 12,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
     },
-    android: { elevation: 4 },
-    default: {},
+    confirmVal: { flex: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
+    input: {
+      height: 48,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: '#E5E7EB',
+      paddingHorizontal: 12,
+      backgroundColor: '#fff',
+      fontWeight: '700',
+      color: '#111827',
+    },
   }),
-  contextAccent: { width: 4 },
-  contextCardBody: { flex: 1, padding: 12, gap: 8 },
-  contextCardBodySpacious: { paddingVertical: 14, paddingHorizontal: 14, gap: 4 },
-  contextKicker: { fontSize: 11, fontWeight: '800' },
-  contextTitle: { marginTop: 2, fontSize: 18, fontWeight: '900' },
-  contextHint: { marginTop: 2, fontSize: 11, fontWeight: '600', lineHeight: 16 },
-  stepTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 6,
-  },
-  stepTitleMain: { flex: 1, minWidth: 0 },
-  contextHintRight: {
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 14,
-    textAlign: 'right',
-    flexShrink: 0,
-    maxWidth: 96,
-    marginTop: 2,
-  },
-
-  fieldBlock: { gap: 10, marginTop: 14 },
-  fieldLabel: { fontSize: 12, fontWeight: '800', letterSpacing: -0.2, marginBottom: 2 },
-  equalChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  tagPresetSecondRow: { marginTop: 8 },
-  equalChipCell: { flex: 1, minWidth: 0 },
-  softChipCell: { borderRadius: 16 },
-  stepChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 2,
-    borderRadius: 999,
-    borderWidth: 1,
-    minWidth: 0,
-  },
-  stepChipNum: { fontSize: 10, fontWeight: '900' },
-  stepChipLabel: { fontSize: 10, fontWeight: '800', letterSpacing: -0.3, flexShrink: 1 },
-
-  labelThemed: { fontSize: 11, fontWeight: '800', marginBottom: 4, marginTop: 2 },
-
-  confirmRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  confirmKey: { fontSize: 13, fontWeight: '700', width: 72 },
-  confirmVal: { flex: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
-
-  extrasToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 8,
-  },
-  extrasToggleTitle: { fontSize: 15, fontWeight: '900' },
-  extrasToggleSub: { marginTop: 2, fontSize: 12, fontWeight: '600' },
-
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-
-  photoAttachRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  attachButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  attachButtonText: { fontWeight: '800', color: '#374151', fontSize: 13 },
-  photoDeleteBtn: {
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  clearPhoto: { fontWeight: '800', color: '#DC2626', fontSize: 13 },
-  photoPreviewWrap: {
-    marginTop: 2,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  photoPreviewLoading: { height: 80 },
-
-  input: {
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    fontWeight: '700',
-    color: '#111827',
-  },
-
-  bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  navGhost: {
-    width: 76,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navGhostText: { fontSize: 15, fontWeight: '800' },
-  bottomHint: { fontWeight: '900', color: '#111827', fontSize: 16 },
-  bottomSub: { marginTop: 4, color: '#6B7280', fontWeight: '700', fontSize: 12 },
-  reasonGroupTitle: {
-    fontWeight: '900',
-    color: '#4B5563',
-    fontSize: 13,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  closeButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-  },
-  closeButtonText: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  scanButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#E8F1FF',
-    borderWidth: 1,
-    borderColor: '#77A7FF',
-    minWidth: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanButtonText: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  pasteButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  pasteButtonText: {
-    fontWeight: '900',
-    color: '#374151',
-    fontSize: 13,
-  },
-  pasteModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  pasteModalSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 28,
-    maxHeight: '88%',
-  },
-  pasteModalTitle: { fontSize: 17, fontWeight: '900', color: '#111827', marginBottom: 8 },
-  pasteModalHint: { fontSize: 13, color: '#6B7280', fontWeight: '600', marginBottom: 12, lineHeight: 18 },
-  pasteModalInput: {
-    minHeight: 160,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 12,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  pasteModalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' },
-  pasteModalSecondary: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-  },
-  pasteModalSecondaryText: { fontWeight: '800', color: '#4B5563', fontSize: 14 },
-  pasteModalPrimary: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#2563EB',
-  },
-  pasteModalPrimaryText: { fontWeight: '900', color: '#fff', fontSize: 14 },
-  dateButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
-  },
-  dateButtonText: {
-    fontWeight: '800',
-    color: '#111827',
-    fontSize: 14,
-  },
-  datePickerContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  datePickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  datePickerContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
-  },
-  datePickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  datePickerCancel: {
-    fontWeight: '700',
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  datePickerTitle: {
-    fontWeight: '900',
-    color: '#111827',
-    fontSize: 16,
-  },
-  datePickerConfirm: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  webDateTimeWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  webDateTimeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6B7280',
-    marginBottom: 6,
-  },
-  webDatePreview: {
-    marginTop: 14,
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#111827',
-    lineHeight: 20,
-  },
-  webDatePanel: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-  },
-});
+};

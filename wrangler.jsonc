@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "regret-wallet-images",
+  "main": "workers/r2-image-api.ts",
+  "compatibility_date": "2026-09-17",
+  "workers_dev": true,
+  "vars": {
+    "FIREBASE_PROJECT_ID": "regret-wallet-3db60",
+    "ALLOWED_ORIGINS": "https://regret-wallet-3db60.web.app,http://localhost:8081,http://localhost:19006"
+  },
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "regret-wallet-images"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

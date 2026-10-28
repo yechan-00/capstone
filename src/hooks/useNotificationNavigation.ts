@@ -4,11 +4,13 @@ import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { scheduleService } from '@/services/scheduleService';
+import { readNotificationAccountId } from '@/lib/localNotificationPayload';
 
 type NotificationData = {
   kind?: string;
   expenseId?: string;
   scheduleId?: string;
+  accountId?: string;
 };
 
 async function resolveReviewNavigation(
@@ -40,6 +42,11 @@ async function handleNotificationResponse(
   if (!response) return false;
 
   const data = (response.notification.request.content.data ?? {}) as NotificationData;
+  const payloadAccountId = readNotificationAccountId(data);
+  if (payloadAccountId && accountId && payloadAccountId !== accountId) {
+    return false;
+  }
+
   const kind = data.kind;
 
   if (kind === 'regret_pattern_alert') {

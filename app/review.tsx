@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -16,43 +17,29 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { FirebaseError } from 'firebase/app';
 import { firstParam } from '@/utils/routerParams';
-import { Chip } from '@/components/Chip';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { PhotoViewerModal } from '@/components/PhotoViewerModal';
+import { ReviewContainPhoto } from '@/components/ReviewContainPhoto';
 import { SatisfactionLevelPicker } from '@/components/SatisfactionLevelPicker';
 import { SuccessOverlay, type SuccessTone } from '@/components/SuccessOverlay';
+import { formatSpentShort } from '@/components/reviews/ReviewListCards';
+import { expenseCategoryLabel } from '@/lib/expenseCategoryLabel';
+import { expenseCardTitle } from '@/lib/expenseDisplay';
 import { regretReasonsForReviewUi } from '@/lib/regretReasons';
 import { decisionAgainFromSatisfaction, needsRegretReasonsFlow } from '@/lib/reviewSatisfaction';
+import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
 import { scheduleService } from '@/services/scheduleService';
 import { useAuth } from '@/hooks/useAuth';
-import { RegretReason } from '@/lib/types';
+import type { Expense, RegretReason } from '@/lib/types';
+import { isDisplayableImageUrl } from '@/utils/expenseImage';
 import { useTheme } from '@/theme/ThemeContext';
-
-const cardShadow = (isDark: boolean) =>
-  Platform.select({
-    ios: {
-      shadowColor: '#0c1220',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: isDark ? 0.45 : 0.06,
-      shadowRadius: 16,
-    },
-    android: { elevation: isDark ? 6 : 2 },
-    default: {},
-  });
-
-function regretChipFlex(label: string): number {
-  const len = label.replace(/\s/g, '').length;
-  if (len <= 1) return 0.68;
-  if (len <= 2) return 0.82;
-  if (len <= 3) return 0.95;
-  return 1.15;
-}
 
 export default function ReviewScreen() {
   const router = useRouter();
   const { user, account } = useAuth();
   const insets = useSafeAreaInsets();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const rawParams = useLocalSearchParams<{
     expenseId?: string | string[];
     scheduleId?: string | string[];
@@ -66,14 +53,70 @@ export default function ReviewScreen() {
   const [reasons, setReasons] = useState<RegretReason[]>([]);
   const [otherReason, setOtherReason] = useState('');
   const [memo, setMemo] = useState('');
+  const [memoFocused, setMemoFocused] = useState(false);
+  const [otherFocused, setOtherFocused] = useState(false);
   const [saving, setSaving] = useState(false);
   const [skipping, setSkipping] = useState(false);
+  const [expense, setExpense] = useState<Expense | null>(null);
+  const [previewState, setPreviewState] = useState<'loading' | 'ready' | 'error' | 'invalid'>('loading');
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [success, setSuccess] = useState<
     null | { tone: SuccessTone; title: string; subtitle?: string; mode: 'auto' | 'tap' }
   >(null);
 
-  const canSubmit = rating >= 1;
+  const canSubmit = rating >= 1 && previewState === 'ready';
   const showReasons = useMemo(() => needsRegretReasonsFlow(rating), [rating]);
+  const mintFill = colors.choiceActiveBg;
+  const mintText = colors.choiceTextActive;
+  const mintBorder = colors.choiceActiveBorder;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPreview = async () => {
+      if (!account) {
+        setPreviewState('loading');
+        setExpense(null);
+        return;
+      }
+      if (!expenseId || !scheduleId) {
+        setPreviewState('invalid');
+        setExpense(null);
+        return;
+      }
+      setPreviewState('loading');
+      try {
+        const [loaded, schedules] = await Promise.all([
+          expenseService.getById(expenseId),
+          scheduleService.getSchedulesByExpenseId(expenseId, account.id),
+        ]);
+        if (cancelled) return;
+        const matched = schedules.some((s) => s.id === scheduleId);
+        if (!loaded || loaded.accountId !== account.id || !matched) {
+          setExpense(null);
+          setPreviewState('invalid');
+          return;
+        }
+        setExpense(loaded);
+        setPreviewState('ready');
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[review] expense preview failed', err);
+        setExpense(null);
+        setPreviewState('error');
+      }
+    };
+    void loadPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [expenseId, scheduleId, account?.id, previewRetry]);
+
+  const goHome = () => {
+    (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
+    (globalThis as { __reloadHomeExpenses?: () => void }).__reloadHomeExpenses?.();
+    router.replace('/(tabs)');
+  };
 
   const onToggleReason = (r: RegretReason) => {
     setReasons((prev) => {
@@ -99,12 +142,13 @@ export default function ReviewScreen() {
   };
 
   const onSubmit = async () => {
-    if (!canSubmit) {
+    if (saving) return;
+    if (rating < 1) {
       Alert.alert('입력 확인', '만족도를 선택해 주세요.');
       return;
     }
-    if (!expenseId || !scheduleId || !user || !account) {
-      Alert.alert('오류', '필수 정보가 없습니다.');
+    if (previewState !== 'ready' || !expenseId || !scheduleId || !user || !account || !expense) {
+      Alert.alert('오류', '소비 정보를 확인할 수 없어 리뷰를 저장하지 않았어요.');
       return;
     }
 
@@ -137,13 +181,18 @@ export default function ReviewScreen() {
           '맛/양이 아쉬웠다면, 다음엔 소용량 또는 검증된 메뉴로 실험 폭을 줄여 보세요.',
         ];
         const tip = tips[Math.floor(Math.random() * tips.length)];
-        setSuccess({ tone: 'regret', title: '기록했어요', subtitle: tip, mode: 'tap' });
+        setSuccess({
+          tone: 'regret',
+          title: '오늘의 소비를 돌아봤어요.',
+          subtitle: tip,
+          mode: 'tap',
+        });
         return;
       }
       setSuccess({
         tone: 'positive',
-        title: '기록 완료!',
-        subtitle: '잘 남겼어요. 패턴이 쌓이고 있어요.',
+        title: '오늘의 소비를 돌아봤어요.',
+        subtitle: '작은 기록이 쌓여 나의 소비 패턴이 됩니다.',
         mode: 'auto',
       });
     } catch (e) {
@@ -155,7 +204,7 @@ export default function ReviewScreen() {
   };
 
   const onSkip = () => {
-    if (!scheduleId) {
+    if (!scheduleId || previewState === 'invalid') {
       Alert.alert('오류', '스케줄 정보를 찾을 수 없습니다.');
       return;
     }
@@ -169,8 +218,7 @@ export default function ReviewScreen() {
             try {
               setSkipping(true);
               await scheduleService.markAsSkipped(scheduleId);
-              (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
-              router.replace('/(tabs)');
+              goHome();
             } catch (e) {
               console.error('[review] skip failed', e);
               const code = e instanceof FirebaseError ? e.code : '';
@@ -188,146 +236,196 @@ export default function ReviewScreen() {
     ]);
   };
 
+  const previewTitle = expenseCardTitle(expense);
+  const previewAmount = expense?.amount != null ? `${Number(expense.amount).toLocaleString()}원` : '';
+  const previewMeta = expense
+    ? `${expenseCategoryLabel(expense.category)} · ${formatSpentShort(expense.spentAt)}`
+    : '';
+  const previewPhoto = isDisplayableImageUrl(expense?.imageUrl) ? expense!.imageUrl! : null;
+
   return (
     <KeyboardAvoidingView
       style={[styles.root, { paddingTop: insets.top, backgroundColor: colors.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
+      <View style={styles.nav}>
+        <Pressable
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
+          style={({ pressed }) => [styles.navIconBtn, { opacity: pressed ? 0.65 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로가기"
+        >
+          <MaterialIcons name="arrow-back" size={22} color={colors.text} />
+        </Pressable>
+        <View style={styles.navCenter}>
+          <Text style={[styles.navTitle, { color: colors.text }]}>소비 돌아보기</Text>
+          <Text style={[styles.navSub, { color: colors.textMuted }]}>그때의 선택은 어땠나요?</Text>
+        </View>
+        <Pressable
+          onPress={onSkip}
+          disabled={skipping || previewState === 'invalid'}
+          style={styles.navSkipWrap}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="건너뛰기"
+        >
+          <Text
+            style={[
+              styles.navSkip,
+              { color: colors.textMuted },
+              (skipping || previewState === 'invalid') && styles.skipDisabled,
+            ]}
+          >
+            건너뛰기
+          </Text>
+        </Pressable>
+      </View>
+
       <ScrollView
-        style={[styles.container, { backgroundColor: colors.bg }]}
+        style={styles.container}
         contentContainerStyle={[styles.content, { paddingBottom: 24 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View
-          style={[
-            styles.hero,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            cardShadow(isDark),
-          ]}
-        >
-          <Pressable
-            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
-            style={({ pressed }) => [styles.heroIconBtn, { opacity: pressed ? 0.65 : 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="뒤로가기"
-          >
-            <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <View style={styles.heroCenter}>
-            <Text style={[styles.heroTitle, { color: colors.text }]}>소비 리뷰</Text>
-            <Text style={[styles.heroSub, { color: colors.textSec }]}>잠깐만 남겨 두면 패턴이 보여요</Text>
-          </View>
-          <Pressable onPress={onSkip} disabled={skipping} style={styles.heroSkipWrap} hitSlop={8}>
-            <Text style={[styles.heroSkip, { color: colors.textMuted }, skipping && styles.skipDisabled]}>
-              건너뛰기
-            </Text>
-          </Pressable>
-        </View>
-
-        <View
-          style={[
-            styles.sheet,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            cardShadow(isDark),
-          ]}
-        >
-          <View style={[styles.sheetAccent, { backgroundColor: colors.primary }]} />
-          <View style={styles.sheetInner}>
-            <Text style={[styles.kicker, { color: colors.textMuted }]}>만족도</Text>
-            <Text style={[styles.blockTitle, { color: colors.text }]}>이번 소비는 어땠나요?</Text>
-            <Text style={[styles.blockDesc, { color: colors.textSec }]}>
-              위에서 아래로, 가장 가까운 쪽을 골라 주세요.
-            </Text>
-            <View style={{ height: 18 }} />
-            <SatisfactionLevelPicker value={rating} onChange={setRating} isDark={isDark} />
-          </View>
-        </View>
-
-        <View
-          style={[
-            styles.sheet,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            cardShadow(isDark),
-          ]}
-        >
-          <View style={[styles.sheetAccent, { backgroundColor: colors.accentCta }]} />
-          <View style={styles.sheetInner}>
-            <Text style={[styles.kicker, { color: colors.textMuted }]}>메모 · 이유</Text>
-            <Text style={[styles.blockTitle, { color: colors.text }]}>
-              {showReasons ? '아쉬웠던 점이 있나요?' : '추가로 남기고 싶은 말'}
-            </Text>
-            <Text style={[styles.blockDesc, { color: colors.textSec }]}>
-              {showReasons
-                ? '자주 고르는 이유만 보여요.'
-                : '선택이에요. 적지 않아도 괜찮아요.'}
-            </Text>
-
-            {showReasons && (
-              <>
-                <View style={{ height: 14 }} />
-                <View style={styles.equalChipRow}>
-                  {primaryRegretReasons.map((r) => (
-                    <Chip
-                      key={r.key}
-                      label={r.label}
-                      active={reasons.includes(r.key)}
-                      onPress={() => onToggleReason(r.key)}
-                      compact
-                      soft
-                      style={[
-                        styles.softChipCell,
-                        { flex: regretChipFlex(r.label), minWidth: 0 },
-                      ]}
-                    />
-                  ))}
+        <View style={styles.previewBlock}>
+          {previewState === 'loading' ? (
+            <View style={styles.previewLoading}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.previewHint, { color: colors.textMuted }]}>소비 정보를 불러오는 중</Text>
+            </View>
+          ) : previewState === 'error' ? (
+            <View style={styles.previewErrorWrap}>
+              <Text style={[styles.previewError, { color: colors.errorText }]}>
+                소비 정보를 불러오지 못했어요.
+              </Text>
+              <Pressable onPress={() => setPreviewRetry((n) => n + 1)} hitSlop={8}>
+                <Text style={[styles.retry, { color: colors.primary }]}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : previewState === 'invalid' ? (
+            <View style={styles.previewErrorWrap}>
+              <Text style={[styles.previewError, { color: colors.errorText }]}>
+                이 소비를 찾을 수 없어 리뷰를 저장할 수 없어요.
+              </Text>
+              <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={8}>
+                <Text style={[styles.retry, { color: colors.primary }]}>돌아가기</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={styles.previewTitleRow}>
+                <Text style={[styles.previewTitle, { color: colors.text }]} numberOfLines={2}>
+                  {previewTitle}
+                </Text>
+                {previewAmount ? (
+                  <Text style={[styles.previewAmount, { color: colors.text }]}>{previewAmount}</Text>
+                ) : null}
+              </View>
+              <Text style={[styles.previewMeta, { color: colors.textMuted }]}>{previewMeta}</Text>
+              {previewPhoto ? (
+                <View style={styles.previewPhoto}>
+                  <ReviewContainPhoto
+                    uri={previewPhoto}
+                    accessibilityLabel="소비 사진 크게 보기"
+                    onPress={() => setPhotoOpen(true)}
+                    photoBg={colors.surfaceMuted}
+                    muted={colors.textMuted}
+                    maxHeight={160}
+                    centerInParent
+                  />
                 </View>
-                {reasons.includes('other') && (
-                  <TextInput
-                    value={otherReason}
-                    onChangeText={setOtherReason}
-                    placeholder="기타 이유를 짧게"
-                    placeholderTextColor={colors.placeholder}
+              ) : null}
+            </>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={[styles.blockTitle, { color: colors.text }]}>이번 소비는 어땠나요?</Text>
+          <Text style={[styles.blockDesc, { color: colors.textSec }]}>가장 가까운 마음을 선택해 주세요.</Text>
+          <View style={{ height: 14 }} />
+          <SatisfactionLevelPicker value={rating} onChange={setRating} />
+        </View>
+
+        {showReasons ? (
+          <View style={styles.section}>
+            <Text style={[styles.blockTitle, { color: colors.text }]}>아쉬웠던 점이 있나요?</Text>
+            <Text style={[styles.blockDesc, { color: colors.textSec }]}>해당하는 이유를 모두 고를 수 있어요.</Text>
+            <View style={styles.chipWrap}>
+              {primaryRegretReasons.map((r) => {
+                const active = reasons.includes(r.key);
+                return (
+                  <Pressable
+                    key={r.key}
+                    onPress={() => onToggleReason(r.key)}
                     style={[
-                      styles.textIn,
+                      styles.chip,
                       {
-                        marginTop: 12,
-                        borderColor: colors.borderInput,
-                        backgroundColor: colors.inputBg,
-                        color: colors.text,
+                        backgroundColor: active ? mintFill : colors.surface,
+                        borderColor: active ? mintBorder : colors.border,
                       },
                     ]}
-                    maxLength={100}
-                  />
-                )}
-              </>
-            )}
-
-            <View style={{ height: 16 }} />
-            <Text style={[styles.memoLabel, { color: colors.textSec }]}>한 줄 메모 (선택)</Text>
-            <TextInput
-              value={memo}
-              onChangeText={setMemo}
-              placeholder="예: 가격대비 양이 적음"
-              placeholderTextColor={colors.placeholder}
-              style={[
-                styles.memo,
-                {
-                  borderColor: colors.borderInput,
-                  backgroundColor: colors.inputBg,
-                  color: colors.text,
-                },
-              ]}
-              multiline
-              onKeyPress={onMemoKeyPress}
-            />
-            {Platform.OS === 'web' ? (
-              <Text style={[styles.webHint, { color: colors.textMuted }]}>
-                Enter로 저장 · Shift+Enter로 줄바꿈
-              </Text>
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.chipText, { color: active ? mintText : colors.text }]}>{r.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {reasons.includes('other') ? (
+              <TextInput
+                value={otherReason}
+                onChangeText={setOtherReason}
+                placeholder="기타 이유를 짧게"
+                placeholderTextColor={colors.placeholder}
+                onFocus={() => setOtherFocused(true)}
+                onBlur={() => setOtherFocused(false)}
+                style={[
+                  styles.textIn,
+                  {
+                    borderColor: otherFocused ? colors.primary : colors.borderInput,
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                  },
+                ]}
+                maxLength={100}
+              />
             ) : null}
           </View>
+        ) : null}
+
+        <View style={styles.section}>
+          <View style={styles.memoHeader}>
+            <Text style={[styles.blockTitle, { color: colors.text }]}>기억하고 싶은 점이 있나요?</Text>
+            <Text style={[styles.optional, { color: colors.textMuted }]}>선택</Text>
+          </View>
+          <Text style={[styles.blockDesc, { color: colors.textSec, marginBottom: 10 }]}>
+            그때의 생각을 짧게 남겨보세요.
+          </Text>
+          <TextInput
+            value={memo}
+            onChangeText={setMemo}
+            placeholder="이번 소비에 대해 남기고 싶은 말을 적어주세요."
+            placeholderTextColor={colors.placeholder}
+            style={[
+              styles.memo,
+              {
+                borderColor: memoFocused ? colors.primary : colors.borderInput,
+                backgroundColor: colors.inputBg,
+                color: colors.text,
+              },
+            ]}
+            multiline
+            onFocus={() => setMemoFocused(true)}
+            onBlur={() => setMemoFocused(false)}
+            onKeyPress={onMemoKeyPress}
+          />
+          {Platform.OS === 'web' ? (
+            <Text style={[styles.webHint, { color: colors.textMuted }]}>
+              Enter로 저장 · Shift+Enter로 줄바꿈
+            </Text>
+          ) : null}
         </View>
 
         <View style={{ height: 100 }} />
@@ -338,14 +436,13 @@ export default function ReviewScreen() {
           styles.bottomBar,
           {
             borderTopColor: colors.border,
-            backgroundColor: colors.surface,
+            backgroundColor: colors.bg,
             paddingBottom: Math.max(insets.bottom, 12),
           },
-          cardShadow(isDark),
         ]}
       >
         <PrimaryButton
-          label={saving ? '저장 중...' : '완료하고 닫기'}
+          label={saving ? '저장 중...' : '리뷰 저장하기'}
           onPress={onSubmit}
           disabled={!canSubmit || saving}
           style={{ flex: 1, height: 52, borderRadius: 14 }}
@@ -360,9 +457,15 @@ export default function ReviewScreen() {
         mode={success?.mode}
         onDone={() => {
           setSuccess(null);
-          (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
-          router.replace('/(tabs)');
+          goHome();
         }}
+      />
+
+      <PhotoViewerModal
+        visible={photoOpen && previewPhoto != null}
+        uri={previewPhoto}
+        accessibilityLabel="소비 사진"
+        onClose={() => setPhotoOpen(false)}
       />
     </KeyboardAvoidingView>
   );
@@ -371,41 +474,80 @@ export default function ReviewScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   container: { flex: 1 },
-  content: { paddingHorizontal: 18, gap: 18 },
+  content: { paddingHorizontal: 20, gap: 22 },
 
-  hero: {
+  nav: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 18,
-    borderWidth: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    gap: 4,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    minHeight: 52,
   },
-  heroIconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  heroCenter: { flex: 1, alignItems: 'center' },
-  heroTitle: { fontSize: 17, fontWeight: '900' },
-  heroSub: { marginTop: 3, fontSize: 12, fontWeight: '600' },
-  heroSkipWrap: { minWidth: 72, alignItems: 'flex-end', paddingRight: 4 },
-  heroSkip: { fontSize: 13, fontWeight: '800' },
+  navIconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  navCenter: { flex: 1, alignItems: 'center' },
+  navTitle: { fontSize: 16, fontWeight: '800' },
+  navSub: { marginTop: 2, fontSize: 12, fontWeight: '600' },
+  navSkipWrap: { minWidth: 64, alignItems: 'flex-end', paddingRight: 8 },
+  navSkip: { fontSize: 13, fontWeight: '600' },
   skipDisabled: { opacity: 0.45 },
 
-  sheet: {
-    flexDirection: 'row',
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
+  previewBlock: {
+    paddingTop: 4,
   },
-  sheetAccent: { width: 5 },
-  sheetInner: { flex: 1, padding: 18 },
-  kicker: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
-  blockTitle: { marginTop: 6, fontSize: 18, fontWeight: '900' },
-  blockDesc: { marginTop: 8, fontSize: 14, fontWeight: '600', lineHeight: 21 },
+  previewLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 44,
+  },
+  previewHint: { fontSize: 13, fontWeight: '600' },
+  previewErrorWrap: { gap: 8 },
+  previewError: { fontSize: 14, fontWeight: '600', lineHeight: 21 },
+  retry: { fontSize: 14, fontWeight: '800' },
+  previewTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  previewTitle: { flex: 1, minWidth: 0, fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
+  previewAmount: { flexShrink: 0, fontSize: 16, fontWeight: '700', lineHeight: 26, textAlign: 'right' },
+  previewMeta: { marginTop: 6, fontSize: 13, fontWeight: '600' },
+  previewPhoto: {
+    marginTop: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
 
-  equalChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: 5 },
-  softChipCell: { borderRadius: 12, paddingHorizontal: 2 },
+  section: { gap: 0 },
+  blockTitle: { fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
+  blockDesc: { marginTop: 6, fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  memoHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
+  },
+  optional: { fontSize: 12, fontWeight: '700' },
+
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  chip: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipText: { fontSize: 13, fontWeight: '700' },
 
   textIn: {
+    marginTop: 12,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -413,14 +555,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  memoLabel: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
   memo: {
-    minHeight: 100,
+    minHeight: 108,
     borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: 15,
     lineHeight: 22,
     textAlignVertical: 'top',
@@ -430,8 +571,7 @@ const styles = StyleSheet.create({
   bottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },

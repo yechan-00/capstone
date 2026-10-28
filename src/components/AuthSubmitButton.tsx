@@ -43,6 +43,9 @@ export function AuthSubmitButton({
   if (usePressable) {
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: isDisabled, busy: loading }}
         onHoverIn={isWeb && !isDisabled ? () => setHovered(true) : undefined}
         onHoverOut={isWeb ? () => setHovered(false) : undefined}
         style={({ pressed }) => [

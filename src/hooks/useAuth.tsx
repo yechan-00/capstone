@@ -11,11 +11,14 @@ import React, {
 import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Account } from '@/lib/types';
-import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays } from '@/lib/accountSettings';
+import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays, resolveRegretPatternAlertEnabled } from '@/lib/accountSettings';
 import { toAccountId } from '@/lib/accountId';
 import * as authService from '@/services/authService';
 import { scheduleService } from '@/services/scheduleService';
 import { backfillUserIdForAccount } from '@/services/userDataMigration';
+import { APP_LOCAL_NOTIFICATION_KINDS } from '@/lib/localNotificationPayload';
+import { cancelLocalNotificationsForAccount } from '@/services/notificationService';
+import { logScheduledNotificationSummary } from '@/services/notificationScheduleDiagnostics';
 
 interface AuthContextType {
   user: User | null;
@@ -52,6 +55,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const authLoadSeq = useRef(0);
+  const logoutBusyRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
@@ -134,11 +138,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const logout = useCallback(async () => {
+    if (logoutBusyRef.current) return;
+    logoutBusyRef.current = true;
+    const accountId = account?.id ?? (user?.uid ? toAccountId(user.uid) : null);
     authLoadSeq.current += 1;
-    await authService.logout();
-    setUser(null);
-    setAccount(null);
-  }, []);
+    try {
+      if (accountId) {
+        const diagOptions = {
+          slots: account?.regretPatternAlertSlots ?? [],
+          enabled: resolveRegretPatternAlertEnabled(account),
+        };
+        await logScheduledNotificationSummary('pre-logout', accountId, diagOptions);
+        const result = await cancelLocalNotificationsForAccount(accountId, APP_LOCAL_NOTIFICATION_KINDS);
+        await logScheduledNotificationSummary('post-logout', accountId, diagOptions);
+        if (__DEV__ && (result.failed > 0 || result.listFailed || result.remainingCurrent > 0)) {
+          console.warn('[notif-logout] current-account leftovers remain', {
+            attempted: result.attempted,
+            cancelled: result.cancelled,
+            failed: result.failed,
+            remainingCurrent: result.remainingCurrent,
+            listFailed: result.listFailed,
+          });
+        }
+      }
+    } catch {
+      console.warn('[notif-logout] cancel before logout failed');
+    }
+
+    try {
+      await authService.logout();
+      setUser(null);
+      setAccount(null);
+    } finally {
+      logoutBusyRef.current = false;
+    }
+  }, [account?.id, user?.uid]);
 
   const signInAsGuest = useCallback(async () => {
     try {

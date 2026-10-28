@@ -16,6 +16,17 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
+    // 공유 페이지 게스트 코멘트 사진
+    match /share_comments/{token}/{fileName} {
+      allow read: if true;
+
+      allow create: if request.auth != null
+        && request.resource.size < 6 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

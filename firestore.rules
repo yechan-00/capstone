@@ -185,5 +185,55 @@ service cloud.firestore {
           resource.data.accountId == 'account_' + request.auth.uid
         );
     }
+
+    // 공유 링크 (expense_shares)
+    match /expense_shares/{token} {
+      allow read: if request.auth != null &&
+        resource.data.createdByUserId == request.auth.uid;
+
+      allow create: if request.auth != null &&
+        request.resource.data.createdByUserId == request.auth.uid &&
+        request.resource.data.accountId == 'account_' + request.auth.uid &&
+        request.resource.data.active == true;
+
+      allow update: if request.auth != null &&
+        resource.data.createdByUserId == request.auth.uid &&
+        request.resource.data.createdByUserId == resource.data.createdByUserId &&
+        request.resource.data.accountId == resource.data.accountId;
+
+      allow delete: if request.auth != null &&
+        resource.data.createdByUserId == request.auth.uid;
+
+      match /guest_comments/{commentId} {
+        allow read: if request.auth != null && (
+          get(/databases/$(database)/documents/expense_shares/$(token)).data.createdByUserId == request.auth.uid ||
+          get(/databases/$(database)/documents/expense_shares/$(token)).data.active == true
+        );
+
+        allow create: if request.auth != null &&
+          get(/databases/$(database)/documents/expense_shares/$(token)).data.active == true &&
+          request.resource.data.keys().hasAll(['guestName', 'body', 'createdAt']) &&
+          request.resource.data.guestName is string &&
+          request.resource.data.guestName.size() > 0 &&
+          request.resource.data.guestName.size() <= 20 &&
+          request.resource.data.body is string &&
+          request.resource.data.body.size() <= 500;
+
+        allow update, delete: if false;
+      }
+    }
+
+    // 앱 내 알림 (공유 코멘트 등) — Cloud Function만 생성, 사용자는 읽기·읽음 처리
+    match /user_notifications/{notificationId} {
+      allow read: if request.auth != null &&
+        resource.data.userId == request.auth.uid;
+
+      allow update: if request.auth != null &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+
+      allow create, delete: if false;
+    }
   }
 }

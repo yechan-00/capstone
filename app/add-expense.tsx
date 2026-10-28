@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// @refresh reset
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -12,59 +12,65 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useAuth } from '@/hooks/useAuth';
-import { Chip } from '@/components/Chip';
-import { AppCard } from '@/components/AppCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SpentAtDateTimePickers } from '@/components/SpentAtDateTimePickers';
-import { CATEGORIES, MOODS, QUICK_AMOUNTS, REASONS, CategoryKey } from '@/lib/expenseOptions';
-import { ExpenseMood } from '@/lib/types';
+import { CATEGORIES, CategoryKey } from '@/lib/expenseOptions';
+
+import {
+  ADD_STEP_BAR_LABELS,
+  LAST_STEP,
+  MEAL_TAG_PRESETS,
+  QUICK_AMOUNTS_STEP,
+  REASON_CHIP_ROWS,
+  formatAmountInput,
+  formatExpenseFormDateTime as formatDateTime,
+  parseAmount,
+  toKoreanMoney,
+  unformat,
+} from '@/lib/expenseForm';
 import { scanReceiptImage } from '@/services/geminiService';
 import { buildManualExpensePayload } from '@/services/expenseInput/manualExpensePayload';
 import { scanResultToFormPatch, type ScanFormPatch } from '@/services/expenseInput/fromScanResult';
 import { parsePastedExpenseText } from '@/services/expenseInput/fromPastedText';
-import { uploadExpenseImage } from '@/services/storageService';
+import {
+  attachUploadedExpenseImageSlots,
+  getR2ImageApiBaseUrl,
+} from '@/services/storageService';
+import {
+  MAX_EXPENSE_PHOTOS,
+  mergePendingExpensePhotos,
+  remainingExpensePhotoSlots,
+  removePendingExpensePhoto,
+  setCoverPendingExpensePhoto,
+  type PendingExpensePhoto,
+} from '@/utils/pendingExpensePhotos';
+import { ExpensePhotoStrip } from '@/components/expenseForm/ExpensePhotoStrip';
 import { scheduleRiskAwarenessAfterExpense } from '@/services/riskSpendingNotification';
 import { useTheme } from '@/theme/ThemeContext';
+import { ADD_FORM_COLORS, expenseFormStyles as styles } from '@/theme/expenseFormStyles';
 import {
   amountKeyboardProps,
   koreanTextInputProps,
   useIosKoreanFieldTransition,
 } from '@/lib/koreanTextInput';
 
-const MEAL_TAG_PRESETS = ['아침', '점심', '저녁'] as const;
-const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
+const TAG_ROW_MEAL = ['아침', '점심', '저녁', '야식'] as const;
+const TAG_ROW_CONTEXT = ['데이트', '시발비용', '보상', '스트레스'] as const;
 
-const ADD_STEPS = ['금액·유형', '시간·사진', '이유·기분', '확인'] as const;
-/** 상단 스텝 바: 한 줄용 짧은 라벨 */
-const ADD_STEP_BAR_LABELS = ['금액', '시간·사진', '이유·기분', '확인'] as const;
-const LAST_STEP = ADD_STEPS.length - 1;
-/** +2만(20000) 칩은 한 줄에 초기화까지 넣기 위해 제외 */
-const QUICK_AMOUNTS_STEP = QUICK_AMOUNTS.filter((v) => v !== 20000);
-const PHOTO_PREVIEW_MAX_HEIGHT = 320;
-const REASON_CHIP_ROWS = [REASONS.slice(0, 4), REASONS.slice(4)] as const;
-
-/** 원본 비율 유지하며 박스 안에 전체가 들어가도록 크기 계산 */
-function fitImageInBox(srcW: number, srcH: number, maxW: number, maxH: number) {
-  if (srcW <= 0 || srcH <= 0) return { width: maxW, height: Math.min(maxH, maxW * 0.75) };
-  let width = maxW;
-  let height = (srcH / srcW) * width;
-  if (height > maxH) {
-    height = maxH;
-    width = (srcW / srcH) * height;
-  }
-  return { width: Math.round(width), height: Math.round(height) };
+function pairsOf<T>(items: readonly T[]): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2) as T[]);
+  return rows;
 }
 
 export default function AddExpenseScreen() {
@@ -74,15 +80,27 @@ export default function AddExpenseScreen() {
   const { user, account } = useAuth();
   const { createExpense, updateExpense } = useExpenses();
   const { colors, isDark } = useTheme();
-  const { width: windowWidth } = useWindowDimensions();
+  const addColors = {
+    accent: ADD_FORM_COLORS.accent,
+    accentText: isDark ? ADD_FORM_COLORS.accent : ADD_FORM_COLORS.accentText,
+    cta: isDark ? ADD_FORM_COLORS.accent : ADD_FORM_COLORS.cta,
+    selectedMint: isDark ? '#1A2E24' : ADD_FORM_COLORS.selectedMint,
+    infoMint: isDark ? colors.surfaceMuted : ADD_FORM_COLORS.infoMint,
+    infoBorder: isDark ? colors.border : ADD_FORM_COLORS.infoBorder,
+    chipIdle: isDark ? colors.surfaceMuted : ADD_FORM_COLORS.chipIdle,
+    inputBorder: isDark ? colors.borderInput : ADD_FORM_COLORS.inputBorder,
+    divider: isDark ? colors.border : ADD_FORM_COLORS.divider,
+    bg: isDark ? colors.bg : ADD_FORM_COLORS.bg,
+    surface: isDark ? colors.surface : ADD_FORM_COLORS.surface,
+    text: isDark ? colors.text : ADD_FORM_COLORS.text,
+    textSecondary: isDark ? colors.textSec : ADD_FORM_COLORS.textSecondary,
+    textMuted: isDark ? colors.textMuted : ADD_FORM_COLORS.textMuted,
+    onPrimary: ADD_FORM_COLORS.onPrimary,
+    border: isDark ? colors.border : ADD_FORM_COLORS.border,
+  };
   const amountRef = useRef<TextInput>(null);
   const itemRef = useRef<TextInput>(null);
   const { markFromFocused, handleKoreanFieldFocus } = useIosKoreanFieldTransition(amountRef);
-  /** 카드 좌우 패딩·액센트 바 제외한 미리보기 최대 너비 */
-  const photoPreviewMaxWidth = windowWidth - 56;
-  const [photoPreviewSize, setPhotoPreviewSize] = useState<{ width: number; height: number } | null>(
-    null,
-  );
 
   const [amountText, setAmountText] = useState(params.amount ?? '');
   const amount = useMemo(() => parseAmount(amountText), [amountText]);
@@ -92,17 +110,22 @@ export default function AddExpenseScreen() {
   const [customReason, setCustomReason] = useState('');
   const [reasonDetail, setReasonDetail] = useState('');
   const [step, setStep] = useState(0);
-  const [hasReachedConfirm, setHasReachedConfirm] = useState(false);
-  const [mood, setMood] = useState<(typeof MOODS)[number]['key'] | null>(null);
+  const [maxReachedStep, setMaxReachedStep] = useState(0);
   const [item, setItem] = useState(params.item ?? '');
+  const [itemFocused, setItemFocused] = useState(false);
+  const [memoFocused, setMemoFocused] = useState(false);
+  const [tagsFocused, setTagsFocused] = useState(false);
+  const [customReasonFocused, setCustomReasonFocused] = useState(false);
   const [summaryLine, setSummaryLine] = useState('');
+  const [formNotice, setFormNotice] = useState<string | null>(null);
   const [tagsText, setTagsText] = useState('');
-  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PendingExpensePhoto[]>([]);
   const [spentAt, setSpentAt] = useState(new Date());
   const [tempSpentAt, setTempSpentAt] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerPhase, setDatePickerPhase] = useState<'date' | 'time'>('date');
   const [saving, setSaving] = useState(false);
+  const savingLockRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteBuffer, setPasteBuffer] = useState('');
@@ -215,6 +238,10 @@ export default function AddExpenseScreen() {
   };
 
   const handleAttachPhoto = async () => {
+    if (savingLockRef.current) return;
+    const remaining = remainingExpensePhotoSlots(photos);
+    if (remaining <= 0) return;
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('사진 권한 필요', '설정에서 사진 접근 권한을 허용해 주세요.');
@@ -222,11 +249,34 @@ export default function AddExpenseScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      orderedSelection: true,
+      quality: 1,
     });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setLocalImageUri(result.assets[0].uri);
+    if (result.canceled) return;
+
+    const incoming: PendingExpensePhoto[] = (result.assets ?? [])
+      .filter((asset) => typeof asset.uri === 'string' && asset.uri.length > 0)
+      .map((asset) => ({
+        id: asset.assetId || asset.uri,
+        uri: asset.uri,
+      }));
+    if (incoming.length === 0) return;
+    if (incoming.length > remaining) {
+      Alert.alert('사진 제한', '사진은 최대 5장까지 추가할 수 있어요.');
     }
+    setPhotos((current) => mergePendingExpensePhotos(current, incoming));
+  };
+
+  const handleRemovePhoto = (id: string) => {
+    if (savingLockRef.current) return;
+    setPhotos((current) => removePendingExpensePhoto(current, id));
+  };
+
+  const handleSetCoverPhoto = (id: string) => {
+    if (savingLockRef.current) return;
+    setPhotos((current) => setCoverPendingExpensePhoto(current, id));
   };
 
   const toggleMealTag = (tag: (typeof MEAL_TAG_PRESETS)[number]) => {
@@ -304,39 +354,10 @@ export default function AddExpenseScreen() {
     setTempSpentAt(next);
   };
 
-  const formatDateTime = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
-  };
-
-  React.useEffect(() => {
-    if (!localImageUri) {
-      setPhotoPreviewSize(null);
-      return;
-    }
-    Image.getSize(
-      localImageUri,
-      (w, h) => {
-        setPhotoPreviewSize(fitImageInBox(w, h, photoPreviewMaxWidth, PHOTO_PREVIEW_MAX_HEIGHT));
-      },
-      () => setPhotoPreviewSize(fitImageInBox(4, 3, photoPreviewMaxWidth, PHOTO_PREVIEW_MAX_HEIGHT)),
-    );
-  }, [localImageUri, photoPreviewMaxWidth]);
-
   const categoryLabel = useMemo(
     () => CATEGORIES.find((c) => c.key === category)?.label ?? category,
     [category],
   );
-
-  const moodLabel = useMemo(() => {
-    if (!mood) return '선택 없음 → 저장 시「보통」으로 기록';
-    const m = MOODS.find((x) => x.key === mood);
-    return m ? `${m.emoji} ${m.label}` : mood;
-  }, [mood]);
 
   const reasonPreview = useMemo(() => {
     const chipPart =
@@ -354,50 +375,52 @@ export default function AddExpenseScreen() {
 
   const jumpToStep = (target: number) => {
     if (target === LAST_STEP && amount <= 0) {
-      Alert.alert('입력 확인', '금액을 입력해 주세요.');
+      setFormNotice('금액을 입력해 주세요.');
       return;
     }
     Keyboard.dismiss();
     setStep(target);
   };
 
-  useEffect(() => {
-    if (step === LAST_STEP) setHasReachedConfirm(true);
-  }, [step]);
-
   const renderConfirmEditRow = (
     label: string,
     value: string,
     targetStep: number,
-    valueColor: string = colors.text,
+    valueColor: string = addColors.text,
+    valueWeight: '600' | '700' | '800' = '600',
   ) => (
     <Pressable
       key={label}
       style={({ pressed }) => [
-        styles.confirmRow,
-        { borderBottomColor: colors.border, opacity: pressed ? 0.72 : 1 },
+        styles.addConfirmRow,
+        { borderBottomColor: addColors.divider, opacity: pressed ? 0.92 : 1 },
       ]}
       onPress={() => jumpToStep(targetStep)}
       accessibilityRole="button"
       accessibilityLabel={`${label} 수정`}
     >
-      <Text style={[styles.confirmKey, { color: colors.textMuted }]}>{label}</Text>
+      <Text style={[styles.addConfirmKey, { color: addColors.textSecondary }]}>{label}</Text>
       <View style={styles.confirmValWrap}>
-        <Text style={[styles.confirmVal, { color: valueColor }]} numberOfLines={4}>
+        <Text
+          style={[styles.addConfirmVal, { color: valueColor, fontWeight: valueWeight }]}
+          numberOfLines={4}
+        >
           {value}
         </Text>
-        <MaterialIcons name="chevron-right" size={18} color={colors.textMuted} />
+        <MaterialIcons name="chevron-right" size={18} color={addColors.textMuted} />
       </View>
     </Pressable>
   );
 
   const goNext = () => {
     if (!canAdvanceFromStep(step)) {
-      Alert.alert('입력 확인', '금액을 입력해 주세요.');
+      setFormNotice('금액을 입력해 주세요.');
       return;
     }
     Keyboard.dismiss();
-    setStep((prev) => Math.min(prev + 1, LAST_STEP));
+    const nextStep = Math.min(step + 1, LAST_STEP);
+    setStep(nextStep);
+    setMaxReachedStep((prev) => Math.max(prev, nextStep));
   };
 
   const goBack = () => {
@@ -405,13 +428,47 @@ export default function AddExpenseScreen() {
     setStep((prev) => Math.max(0, prev - 1));
   };
 
+  const renderGridCell = (
+    label: string,
+    active: boolean,
+    onPress: () => void,
+    variant: 'reason' | 'tag',
+  ) => (
+    <Pressable
+      key={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        variant === 'tag' ? styles.addTagCell : styles.addReasonCell,
+        {
+          backgroundColor: active ? addColors.selectedMint : addColors.chipIdle,
+          borderColor: active ? addColors.accent : addColors.border,
+          opacity: pressed ? 0.94 : 1,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          variant === 'tag' ? styles.addTagChipText : styles.addFormChipText,
+          { color: active ? addColors.accentText : addColors.text },
+        ]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.85}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+
   const canSave = amount > 0 && !!category;
 
   const onSave = async () => {
     if (!canSave) {
-      Alert.alert('입력 확인', '금액과 카테고리를 입력해 주세요.');
+      setFormNotice('금액과 카테고리를 입력해 주세요.');
       return;
     }
+    if (savingLockRef.current) return;
+    savingLockRef.current = true;
 
     try {
       setSaving(true);
@@ -431,23 +488,30 @@ export default function AddExpenseScreen() {
           : '';
       const resolvedReason =
         [chipPart, reasonDetail.trim()].filter(Boolean).join(' · ') || '기록 없음';
-      const resolvedMood = (mood ?? 'normal') as ExpenseMood;
 
       const payload = buildManualExpensePayload({
         amount,
         category,
         item: item.trim(),
         reason: resolvedReason,
-        mood: resolvedMood,
         tags,
         spentAt,
         sourceType: 'manual',
         sourceRef: null,
         summaryLine: summaryLine.trim() || undefined,
         imageUrl: null,
+        imageUrls: [],
       });
 
-      const expenseId = await createExpense(payload);
+      if (photos.length > 0 && !getR2ImageApiBaseUrl()) {
+        Alert.alert(
+          '사진 서버 없음',
+          '사진이 있어 저장을 중단했어요. EXPO_PUBLIC_R2_IMAGE_API_URL을 설정한 뒤 다시 시도해 주세요.',
+        );
+        return;
+      }
+
+      const createdExpenseId = await createExpense(payload);
 
       void scheduleRiskAwarenessAfterExpense({
         amount,
@@ -458,12 +522,28 @@ export default function AddExpenseScreen() {
         account,
       });
 
-      if (user?.uid && localImageUri) {
-        try {
-          const url = await uploadExpenseImage(user.uid, expenseId, localImageUri);
-          await updateExpense(expenseId, { imageUrl: url });
-        } catch (err) {
-          console.warn('[expense] image upload failed', err);
+      if (user?.uid && photos.length > 0) {
+        const result = await attachUploadedExpenseImageSlots(
+          user.uid,
+          createdExpenseId,
+          photos.map((photo) => photo.uri),
+          updateExpense,
+        );
+        if (!result.persisted && result.imageUrls.length > 0) {
+          Alert.alert(
+            '사진 연결 실패',
+            '사진은 올라갔지만 기록에 연결하지 못했어요. 소비 기록은 저장됐어요. 수정 화면에서 사진을 다시 올려 주세요.',
+          );
+        } else if (result.failedCount > 0 && result.imageUrls.length > 0) {
+          Alert.alert(
+            '일부 사진 저장 실패',
+            `사진 ${result.total}장 중 ${result.imageUrls.length}장만 저장됐어요. 소비 기록은 저장됐어요.`,
+          );
+        } else if (result.total > 0 && result.imageUrls.length === 0) {
+          Alert.alert(
+            '사진 저장 실패',
+            '사진은 저장하지 못했어요. 소비 기록은 저장됐어요. 수정 화면에서 사진을 다시 올려 주세요.',
+          );
         }
       }
 
@@ -473,37 +553,25 @@ export default function AddExpenseScreen() {
       Alert.alert('저장 실패', `저장하지 못했어요. 오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally {
       setSaving(false);
+      savingLockRef.current = false;
     }
   };
 
-  const headerTitleColor = isDark ? colors.onPrimary : colors.onPrimary;
-  const headerSubColor = 'rgba(255,255,255,0.78)';
-  const headerActionBorder = 'rgba(255,255,255,0.28)';
-  const headerActionBg = 'rgba(255,255,255,0.12)';
-
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.bg }]} edges={['left', 'right']}>
-      <StatusBar style="light" />
-      <View style={styles.screenHeader}>
-        {isDark ? (
-          <LinearGradient
-            colors={[colors.headerGradientStart, colors.headerGradientEnd]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.accentCta }]} />
-        )}
-        <View style={[styles.screenHeaderInner, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.headerRow}>
-            <Text style={[styles.h1, { color: headerTitleColor }]}>소비 추가</Text>
-            <View style={styles.headerActions}>
+    <SafeAreaView style={[styles.root, { backgroundColor: addColors.bg }]} edges={['left', 'right']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <View style={[styles.addHeader, { backgroundColor: addColors.bg, borderBottomColor: addColors.border }]}>
+        <View style={[styles.addHeaderInner, { paddingTop: insets.top + 6 }]}>
+          <View style={styles.addHeaderRow}>
+            <Text style={[styles.addHeaderTitle, { color: addColors.text }]}>소비 추가</Text>
+            <View style={styles.addHeaderActions}>
               <Pressable
-                style={[
-                  styles.headerActionBtn,
-                  { borderColor: headerActionBorder, backgroundColor: headerActionBg },
-                  scanning && { opacity: 0.6 },
+                style={({ pressed }) => [
+                  styles.addHeaderUtilBtn,
+                  {
+                    backgroundColor: pressed || scanning ? addColors.selectedMint : addColors.chipIdle,
+                    opacity: scanning ? 0.7 : 1,
+                  },
                 ]}
                 onPress={handleScanPress}
                 disabled={scanning}
@@ -511,220 +579,285 @@ export default function AddExpenseScreen() {
                 accessibilityLabel="영수증 스캔"
               >
                 {scanning ? (
-                  <ActivityIndicator size="small" color={headerTitleColor} />
+                  <ActivityIndicator size="small" color={addColors.textMuted} />
                 ) : (
                   <>
-                    <MaterialIcons name="document-scanner" size={15} color={headerTitleColor} />
-                    <Text style={[styles.headerActionText, { color: headerTitleColor }]}>스캔</Text>
+                    <MaterialIcons name="document-scanner" size={16} color={addColors.textMuted} />
+                    <Text style={[styles.addHeaderUtilText, { color: addColors.textMuted }]}>스캔</Text>
                   </>
                 )}
               </Pressable>
               <Pressable
-                style={[styles.headerActionBtn, { borderColor: headerActionBorder, backgroundColor: headerActionBg }]}
+                style={({ pressed }) => [
+                  styles.addHeaderUtilBtn,
+                  { backgroundColor: pressed ? addColors.selectedMint : addColors.chipIdle },
+                ]}
                 onPress={openPasteModal}
                 accessibilityRole="button"
                 accessibilityLabel="문자 붙여넣기"
               >
-                <MaterialIcons name="content-paste" size={15} color={headerSubColor} />
-                <Text style={[styles.headerActionText, { color: headerSubColor }]}>붙여넣기</Text>
+                <MaterialIcons name="content-paste" size={16} color={addColors.textMuted} />
+                <Text style={[styles.addHeaderUtilText, { color: addColors.textMuted }]}>붙여넣기</Text>
               </Pressable>
               <Pressable
-                style={[styles.headerActionBtn, { borderColor: headerActionBorder, backgroundColor: headerActionBg }]}
+                style={({ pressed }) => [styles.addHeaderCloseBtn, pressed && { opacity: 0.7 }]}
                 onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
                 accessibilityRole="button"
                 accessibilityLabel="닫기"
               >
-                <MaterialIcons name="close" size={16} color={headerSubColor} />
-                <Text style={[styles.headerActionText, { color: headerSubColor }]}>닫기</Text>
+                <MaterialIcons name="close" size={18} color={addColors.textMuted} />
               </Pressable>
             </View>
           </View>
 
-          <View style={[styles.stepStripOnHeader, { backgroundColor: 'rgba(255,255,255,0.14)' }]}>
-            {ADD_STEP_BAR_LABELS.map((barLabel, i) => {
-              const active = i === step;
-              const locked = !hasReachedConfirm && i > step;
-              const reachable = hasReachedConfirm || i <= step;
-              return (
-                <Pressable
-                  key={barLabel}
-                  onPress={() => {
-                    if (hasReachedConfirm) jumpToStep(i);
-                    else if (i < step) jumpToStep(i);
-                  }}
-                  disabled={locked}
-                  style={({ pressed }) => [
-                    styles.stepChip,
-                    {
-                      borderColor: active ? colors.onPrimary : 'transparent',
-                      backgroundColor: active
-                        ? colors.onPrimary
-                        : reachable && !active
-                          ? 'rgba(255,255,255,0.22)'
-                          : 'transparent',
-                      opacity: pressed && reachable && !active ? 0.88 : 1,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stepChipNum,
-                      {
-                        color: active
-                          ? colors.accentCta
-                          : reachable
-                            ? colors.onPrimary
-                            : headerSubColor,
-                      },
+          <View style={styles.addStepper}>
+            <View style={styles.addStepperVisual} pointerEvents="none">
+              <View style={[styles.addStepperTrackBase, { backgroundColor: addColors.border }]} />
+              <View
+                style={[
+                  styles.addStepperTrackFill,
+                  {
+                    backgroundColor: addColors.accent,
+                    width: `${(maxReachedStep / LAST_STEP) * 75}%`,
+                  },
+                ]}
+              />
+              {ADD_STEP_BAR_LABELS.map((barLabel, i) => {
+                const active = i === step;
+                const reachable = i <= maxReachedStep;
+                return (
+                  <View key={barLabel} style={styles.addStepperCircleCol}>
+                    <View
+                      style={[
+                        styles.addStepperCircle,
+                        {
+                          borderColor: active || reachable ? addColors.accent : addColors.border,
+                          backgroundColor: active ? addColors.accent : addColors.surface,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.addStepperNum,
+                          {
+                            color: active
+                              ? addColors.onPrimary
+                              : reachable
+                                ? addColors.accent
+                                : addColors.textMuted,
+                          },
+                        ]}
+                      >
+                        {i + 1}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.addStepperLabelRow} pointerEvents="none">
+              {ADD_STEP_BAR_LABELS.map((barLabel, i) => {
+                const active = i === step;
+                const reachable = i <= maxReachedStep;
+                return (
+                  <View key={barLabel} style={styles.addStepperLabelCell}>
+                    <Text
+                      style={[
+                        styles.addStepperLabel,
+                        {
+                          color: active
+                            ? addColors.accentText
+                            : reachable
+                              ? addColors.text
+                              : addColors.textMuted,
+                          fontWeight: active ? '600' : '500',
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {barLabel}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.addStepperHitRow}>
+              {ADD_STEP_BAR_LABELS.map((barLabel, i) => {
+                const reachable = i <= maxReachedStep;
+                return (
+                  <Pressable
+                    key={barLabel}
+                    collapsable={false}
+                    onPress={() => {
+                      if (i <= maxReachedStep) jumpToStep(i);
+                    }}
+                    disabled={!reachable}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !reachable, selected: i === step }}
+                    accessibilityLabel={`${i + 1} ${barLabel}`}
+                    style={({ pressed }) => [
+                      styles.addStepperHitCell,
+                      { opacity: pressed && reachable ? 0.85 : 1 },
                     ]}
-                  >
-                    {i + 1}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.stepChipLabel,
-                      {
-                        color: active
-                          ? colors.accentCta
-                          : reachable
-                            ? colors.onPrimary
-                            : headerSubColor,
-                      },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {barLabel}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  />
+                );
+              })}
+            </View>
           </View>
         </View>
       </View>
 
-      <View style={[styles.pageBody, { backgroundColor: colors.bg }]}>
+      <View style={[styles.addPageBody, { backgroundColor: addColors.bg }]}>
       <KeyboardAvoidingView
-        style={styles.pageBodyInner}
+        style={[styles.pageBodyInner, { backgroundColor: addColors.bg }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
       <ScrollView
         keyboardShouldPersistTaps="handled"
-        style={styles.container}
+        style={[styles.container, { backgroundColor: addColors.bg }]}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: 120 + insets.bottom + (step === 2 ? 20 : 0) },
-          step === 0 && styles.contentNoScroll,
+          step === 0 ? styles.amountContent : styles.addStepContent,
+          { paddingBottom: 128 + insets.bottom + (step === 2 ? 24 : 0) },
         ]}
-        scrollEnabled={step !== 0}
+        scrollEnabled
         bounces={step !== 0}
         alwaysBounceVertical={false}
         showsVerticalScrollIndicator={false}
       >
         {step === 0 ? (
-          <AppCard
-            style={{
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              backgroundColor: colors.surfaceMuted,
-              borderColor: colors.border,
-            }}
-          >
-            <Text style={[styles.timingTitle, { color: colors.text }]}>식사·간식 후에 기록해 주세요</Text>
-            <Text style={[styles.timingBody, { color: colors.textSec }]}>
-              한 끼가 끝난 뒤 차분할 때 적으면 후회·만족을 더 잘 떠올릴 수 있어요.
-            </Text>
-          </AppCard>
-        ) : null}
+          <View style={styles.amountStep}>
+            <View
+              style={[
+                styles.addHint,
+                {
+                  backgroundColor: addColors.infoMint,
+                  borderColor: addColors.infoBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.addHintTitle, { color: addColors.textSecondary }]}>
+                식사·간식 후에 기록해 주세요
+              </Text>
+              <Text style={[styles.addHintBody, { color: addColors.textMuted }]}>
+                한 끼가 끝난 뒤 기록하면 더 정확히 돌아볼 수 있어요.
+              </Text>
+            </View>
 
-        {step === 0 ? (
-          <View
-            style={[
-              styles.contextCardShell,
-              { borderColor: colors.border, backgroundColor: colors.surface },
-              !isDark && styles.contextCardShadow,
-            ]}
-          >
-            <View style={[styles.contextAccent, { backgroundColor: colors.primary }]} />
-            <View style={styles.contextCardBody}>
-              <Text style={[styles.contextKicker, { color: colors.textMuted }]}>1단계</Text>
-              <Text style={[styles.contextTitle, { color: colors.text }]}>얼마를 썼나요?</Text>
-              <Text style={[styles.contextHint, { color: colors.textSec }]}>금액은 필수예요.</Text>
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>금액</Text>
-              <TextInput
-                ref={amountRef}
-                value={formatAmountInput(amountText)}
-                onChangeText={(t) => setAmountText(unformat(t))}
-                {...amountKeyboardProps}
-                onFocus={markFromFocused}
-                placeholder="0"
-                placeholderTextColor={colors.placeholder}
-                blurOnSubmit
-                onSubmitEditing={() => handleKoreanFieldFocus(itemRef)}
+            <View style={styles.amountFieldBlock}>
+              <Text style={[styles.amountStepTitle, { color: addColors.text }]}>얼마를 썼나요?</Text>
+              <View
                 style={[
-                  styles.amountInput,
-                  {
-                    borderColor: colors.borderInput,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
-                  },
+                  styles.amountHeroRow,
+                  { borderBottomColor: addColors.divider },
                 ]}
-              />
-              <View style={styles.quickRow}>
-                {QUICK_AMOUNTS_STEP.map((v) => (
-                  <Chip
-                    key={v}
-                    label={`+${toKoreanMoney(v)}`}
-                    onPress={() => setAmountText(String(amount + v))}
-                  />
-                ))}
-                <Chip label="초기화" onPress={() => setAmountText('')} />
+              >
+                <TextInput
+                  ref={amountRef}
+                  value={formatAmountInput(amountText)}
+                  onChangeText={(t) => setAmountText(unformat(t))}
+                  {...amountKeyboardProps}
+                  onFocus={markFromFocused}
+                  placeholder="0"
+                  placeholderTextColor={addColors.textMuted}
+                  blurOnSubmit
+                  onSubmitEditing={() => handleKoreanFieldFocus(itemRef)}
+                  style={[
+                    styles.amountHeroInput,
+                    { color: amount > 0 ? addColors.text : addColors.textMuted },
+                  ]}
+                />
+                <Text style={[styles.amountHeroUnit, { color: addColors.textMuted }]}>원</Text>
               </View>
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>메뉴</Text>
+              <View style={styles.amountQuickRow}>
+                {QUICK_AMOUNTS_STEP.map((v) => (
+                  <Pressable
+                    key={v}
+                    onPress={() => setAmountText(String(amount + v))}
+                    style={({ pressed }) => [
+                      styles.amountQuickChip,
+                      {
+                        backgroundColor: pressed ? addColors.selectedMint : addColors.surface,
+                        borderColor: addColors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.amountQuickChipText, { color: addColors.text }]}>
+                      +{toKoreanMoney(v)}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  onPress={() => setAmountText('')}
+                  style={({ pressed }) => [
+                    styles.amountQuickChip,
+                    {
+                      backgroundColor: pressed ? addColors.chipIdle : addColors.surface,
+                      borderColor: addColors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.amountQuickChipText, { color: addColors.textMuted }]}>초기화</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.amountFieldBlock}>
+              <Text style={[styles.amountFieldLabel, { color: addColors.text }]}>어떤 소비였나요?</Text>
               <TextInput
                 ref={itemRef}
                 value={item}
                 onChangeText={setItem}
-                placeholder="예: 아메리카노, 치킨 반마리"
-                placeholderTextColor={colors.placeholder}
-                onFocus={() => handleKoreanFieldFocus(itemRef)}
+                placeholder="아메리카노, 치킨 반마리"
+                placeholderTextColor={addColors.textMuted}
+                onFocus={() => {
+                  handleKoreanFieldFocus(itemRef);
+                  setItemFocused(true);
+                }}
+                onBlur={() => setItemFocused(false)}
                 {...koreanTextInputProps}
                 returnKeyType="done"
                 blurOnSubmit
                 style={[
-                  styles.input,
+                  styles.amountItemInput,
                   {
-                    borderColor: colors.borderInput,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
+                    borderColor: itemFocused ? addColors.accent : addColors.inputBorder,
+                    backgroundColor: addColors.surface,
+                    color: addColors.text,
                   },
                 ]}
               />
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>유형</Text>
-              <View style={styles.categoryRowCompact}>
+            </View>
+
+            <View style={styles.amountFieldBlock}>
+              <Text style={[styles.amountFieldLabel, { color: addColors.text }]}>유형</Text>
+              <View style={styles.amountCategoryRow}>
                 {CATEGORIES.map((c) => {
                   const active = c.key === category;
                   return (
                     <Pressable
                       key={c.key}
-                      style={[
-                        styles.categoryPill,
+                      style={({ pressed }) => [
+                        styles.amountCategoryPill,
                         {
-                          backgroundColor: colors.surface,
-                          borderColor: active ? colors.choiceActiveBorder : colors.border,
+                          backgroundColor: active ? addColors.selectedMint : addColors.surface,
+                          borderColor: active ? addColors.accent : addColors.border,
+                          opacity: pressed ? 0.94 : 1,
                         },
-                        active && { backgroundColor: colors.choiceActiveBg },
                       ]}
                       onPress={() => setCategory(c.key)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={c.label}
                     >
-                      <Text style={styles.categoryPillEmoji}>{c.emoji}</Text>
+                      <Text style={styles.amountCategoryEmoji} accessible={false}>{c.emoji}</Text>
                       <Text
                         style={[
-                          styles.categoryPillText,
-                          { color: colors.textSec },
-                          active && { color: colors.choiceTextActive, fontWeight: '800' },
+                          styles.amountCategoryText,
+                          { color: active ? addColors.accentText : addColors.text },
                         ]}
-                        numberOfLines={1}
+                        numberOfLines={2}
                       >
                         {c.label}
                       </Text>
@@ -739,69 +872,92 @@ export default function AddExpenseScreen() {
         {step === 1 ? (
           <View
             style={[
-              styles.contextCardShell,
-              { borderColor: colors.border, backgroundColor: colors.surface },
-              !isDark && styles.contextCardShadow,
+              styles.addSheet,
+              { borderColor: addColors.border, backgroundColor: addColors.surface },
             ]}
           >
-            <View style={[styles.contextAccent, { backgroundColor: colors.primary }]} />
-            <View style={styles.contextCardBody}>
-              <Text style={[styles.contextKicker, { color: colors.textMuted }]}>2단계</Text>
-              <Text style={[styles.contextTitle, { color: colors.text }]}>언제 결제했나요?</Text>
-              <Text style={[styles.contextHint, { color: colors.textSec }]}>사진은 선택이에요.</Text>
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>거래 시간</Text>
+            <View>
+              <Text style={[styles.addStepTitle, { color: addColors.text }]}>언제 결제했나요?</Text>
+              <Text style={[styles.addStepHelper, { color: addColors.textSecondary }]}>
+                사진은 선택이에요.
+              </Text>
+            </View>
+
+            <View style={styles.addSection}>
+              <Text style={[styles.addSectionLabel, { color: addColors.text }]}>거래 시간</Text>
               <Pressable
-                style={[
-                  styles.dateButton,
-                  { borderColor: colors.border, backgroundColor: colors.inputBg },
+                style={({ pressed }) => [
+                  styles.addTimeRow,
+                  {
+                    borderColor: addColors.inputBorder,
+                    backgroundColor: addColors.surface,
+                    opacity: pressed ? 0.94 : 1,
+                  },
                 ]}
                 onPress={handleDatePickerOpen}
               >
-                <Text style={[styles.dateButtonText, { color: colors.text }]}>{formatDateTime(spentAt)}</Text>
+                <Text style={[styles.addTimeValue, { color: addColors.text }]}>
+                  {formatDateTime(spentAt).replace(/-/g, '.')}
+                </Text>
+                <MaterialIcons name="chevron-right" size={20} color={addColors.textMuted} />
               </Pressable>
-              <Text style={[styles.labelThemed, { color: colors.textMuted }]}>사진</Text>
-              <View style={styles.photoAttachRow}>
+            </View>
+
+            <View style={styles.addSection}>
+              <View style={styles.addSectionLabelRow}>
+                <Text style={[styles.addSectionLabel, { color: addColors.text }]}>사진</Text>
+                <Text style={[styles.addPhotoCount, { color: addColors.textSecondary }]}>
+                  {photos.length}/{MAX_EXPENSE_PHOTOS}장
+                </Text>
+              </View>
+              <Text style={[styles.addPhotoGuide, { color: addColors.textMuted }]}>
+                사진은 최대 5장까지 추가할 수 있어요.
+              </Text>
+              <Text style={[styles.addPhotoGuide, { color: addColors.textMuted }]}>
+                첫 번째 사진이 홈과 목록에 표시돼요.
+              </Text>
+              {photos.length === 0 ? (
                 <Pressable
-                  style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
+                  style={({ pressed }) => [
+                    styles.addPhotoEmpty,
+                    {
+                      borderColor: addColors.border,
+                      backgroundColor: addColors.chipIdle,
+                      opacity: saving ? 0.6 : pressed ? 0.94 : 1,
+                    },
+                  ]}
                   onPress={handleAttachPhoto}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 추가"
                 >
-                  <MaterialIcons name="photo-library" size={16} color={colors.textSec} />
-                  <Text style={[styles.attachButtonText, { color: colors.text }]}>
-                    {localImageUri ? '사진 바꾸기' : '갤러리에서 첨부'}
+                  <MaterialIcons name="photo-library" size={22} color={addColors.textMuted} />
+                  <Text style={[styles.addPhotoEmptyTitle, { color: addColors.text }]}>사진 추가</Text>
+                  <Text style={[styles.addPhotoEmptyHint, { color: addColors.textMuted }]}>
+                    선택 사항 · 여러 장 선택 가능
                   </Text>
                 </Pressable>
-                {localImageUri ? (
-                  <Pressable
-                    style={[styles.photoDeleteBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                    onPress={() => setLocalImageUri(null)}
-                    accessibilityRole="button"
-                    accessibilityLabel="첨부 사진 삭제"
-                  >
-                    <Text style={[styles.clearPhoto, { color: colors.logoutText }]}>삭제</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-              {localImageUri ? (
-                <View
-                  style={[
-                    styles.photoPreviewWrap,
-                    { borderColor: colors.border, backgroundColor: colors.surfaceMuted },
-                  ]}
-                >
-                  {photoPreviewSize ? (
-                    <Image
-                      source={{ uri: localImageUri }}
-                      style={{
-                        width: photoPreviewSize.width,
-                        height: photoPreviewSize.height,
-                      }}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <ActivityIndicator size="small" color={colors.primary} style={styles.photoPreviewLoading} />
-                  )}
-                </View>
-              ) : null}
+              ) : (
+                <ExpensePhotoStrip
+                  photos={photos}
+                  saving={saving}
+                  onAdd={handleAttachPhoto}
+                  onRemove={handleRemovePhoto}
+                  onSetCover={handleSetCoverPhoto}
+                  colors={{
+                    border: addColors.border,
+                    surface: addColors.surface,
+                    surfaceMuted: addColors.chipIdle,
+                    text: addColors.text,
+                    textMuted: addColors.textMuted,
+                    textSecondary: addColors.textSecondary,
+                    accent: addColors.cta,
+                    accentText: addColors.accentText,
+                    onAccent: addColors.onPrimary,
+                    danger: colors.logoutText,
+                  }}
+                />
+              )}
             </View>
           </View>
         ) : null}
@@ -809,163 +965,127 @@ export default function AddExpenseScreen() {
         {step === 2 ? (
           <View
             style={[
-              styles.contextCardShell,
-              { borderColor: colors.border, backgroundColor: colors.surface },
-              !isDark && styles.contextCardShadow,
+              styles.addSheet,
+              { borderColor: addColors.border, backgroundColor: addColors.surface },
             ]}
           >
-            <View style={[styles.contextAccent, { backgroundColor: colors.primary }]} />
-            <View style={[styles.contextCardBody, styles.contextCardBodySpacious]}>
-              <View style={styles.stepTitleRow}>
-                <View style={styles.stepTitleMain}>
-                  <Text style={[styles.contextKicker, { color: colors.textMuted }]}>3단계</Text>
-                  <Text style={[styles.contextTitle, { color: colors.text, marginTop: 2 }]}>이유 · 기분</Text>
-                </View>
-                <Text style={[styles.contextHintRight, { color: colors.textMuted }]}>
-                  모두 선택{'\n'}건너뛰기 가능
+            <View style={styles.addSection}>
+              <View style={styles.addSectionLabelRow}>
+                <Text style={[styles.addReasonQuestion, { color: addColors.text }]}>왜 샀나요?</Text>
+                <Text style={[styles.addOptionalHint, { color: addColors.textMuted }]}>
+                  선택 사항
                 </Text>
               </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>왜 썼나요</Text>
-                {REASON_CHIP_ROWS.map((row, rowIdx) => (
-                  <View key={rowIdx} style={styles.equalChipRow}>
-                    {row.map((reasonItem) => (
-                      <Chip
-                        key={reasonItem}
-                        compact
-                        soft
-                        style={[styles.equalChipCell, styles.softChipCell]}
-                        label={reasonItem}
-                        active={reasons.includes(reasonItem)}
-                        onPress={() => {
-                          const selected = reasons.includes(reasonItem);
-                          if (selected) {
-                            setReasons((prev) => prev.filter((r) => r !== reasonItem));
-                            if (reasonItem === '기타') setCustomReason('');
-                          } else {
-                            setReasons((prev) => [...prev, reasonItem]);
-                            if (reasonItem !== '기타') setCustomReason('');
-                          }
-                        }}
-                      />
-                    ))}
+              <View style={styles.addGrid}>
+                {pairsOf(REASON_CHIP_ROWS.flat()).map((row) => (
+                  <View key={row.join('-')} style={styles.addGridRow}>
+                    {row.map((reasonItem) =>
+                      renderGridCell(reasonItem, reasons.includes(reasonItem), () => {
+                        const selected = reasons.includes(reasonItem);
+                        if (selected) {
+                          setReasons((prev) => prev.filter((r) => r !== reasonItem));
+                          if (reasonItem === '기타') setCustomReason('');
+                        } else {
+                          setReasons((prev) => [...prev, reasonItem]);
+                          if (reasonItem !== '기타') setCustomReason('');
+                        }
+                      }, 'reason'),
+                    )}
                   </View>
                 ))}
-                {reasons.includes('기타') ? (
-                  <TextInput
-                    value={customReason}
-                    onChangeText={setCustomReason}
-                    placeholder="기타 내용"
-                    placeholderTextColor={colors.placeholder}
-                    {...koreanTextInputProps}
-                    style={[
-                      styles.input,
-                      {
-                        borderColor: colors.borderInput,
-                        backgroundColor: colors.inputBg,
-                        color: colors.text,
+              </View>
+              {reasons.includes('기타') ? (
+                <TextInput
+                  value={customReason}
+                  onChangeText={setCustomReason}
+                  placeholder="기타 내용"
+                  placeholderTextColor={addColors.textMuted}
+                  onFocus={() => setCustomReasonFocused(true)}
+                  onBlur={() => setCustomReasonFocused(false)}
+                  {...koreanTextInputProps}
+                  style={[
+                    styles.addMemoInput,
+                    {
+                      borderColor: customReasonFocused ? addColors.accent : addColors.inputBorder,
+                      backgroundColor: addColors.surface,
+                      color: addColors.text,
+                    },
+                  ]}
+                />
+              ) : null}
+            </View>
+
+            <View style={styles.addSection}>
+              <View style={styles.addSectionLabelRow}>
+                <Text style={[styles.addSectionLabel, { color: addColors.text }]}>상황 메모</Text>
+                <Text style={[styles.addOptionalHint, { color: addColors.textMuted }]}>선택</Text>
+              </View>
+              <TextInput
+                value={reasonDetail}
+                onChangeText={setReasonDetail}
+                placeholder="예: 친구들과 저녁 약속이 있어서"
+                placeholderTextColor={addColors.textMuted}
+                onFocus={() => setMemoFocused(true)}
+                onBlur={() => setMemoFocused(false)}
+                {...koreanTextInputProps}
+                style={[
+                  styles.addMemoInput,
+                  {
+                    borderColor: memoFocused ? addColors.accent : addColors.inputBorder,
+                    backgroundColor: addColors.surface,
+                    color: addColors.text,
+                  },
+                ]}
+              />
+            </View>
+
+            <View style={styles.addSection}>
+              <Text style={[styles.addSectionLabel, { color: addColors.text }]}>태그</Text>
+              <View style={styles.addGrid}>
+                <View style={styles.addGridRow}>
+                  {TAG_ROW_MEAL.map((tag) =>
+                    renderGridCell(
+                      tag,
+                      tagsText.split(',').some((t) => t.trim() === tag),
+                      () => {
+                        if ((MEAL_TAG_PRESETS as readonly string[]).includes(tag)) {
+                          toggleMealTag(tag as (typeof MEAL_TAG_PRESETS)[number]);
+                        } else {
+                          togglePresetTag(tag);
+                        }
                       },
-                    ]}
-                  />
-                ) : null}
-                <TextInput
-                  value={reasonDetail}
-                  onChangeText={setReasonDetail}
-                  placeholder="상황을 한 줄로"
-                  placeholderTextColor={colors.placeholder}
-                  {...koreanTextInputProps}
-                  style={[
-                    styles.input,
-                    {
-                      borderColor: colors.borderInput,
-                      backgroundColor: colors.inputBg,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>당시 기분</Text>
-                <View style={styles.equalChipRow}>
-                  {MOODS.map((m) => (
-                    <Chip
-                      key={m.key}
-                      compact
-                      soft
-                      style={[styles.equalChipCell, styles.softChipCell]}
-                      label={m.label}
-                      active={mood === m.key}
-                      onPress={() => setMood(mood === m.key ? null : m.key)}
-                    />
-                  ))}
+                      'tag',
+                    ),
+                  )}
+                </View>
+                <View style={styles.addGridRow}>
+                  {TAG_ROW_CONTEXT.map((tag) =>
+                    renderGridCell(
+                      tag,
+                      tagsText.split(',').some((t) => t.trim() === tag),
+                      () => togglePresetTag(tag),
+                      'tag',
+                    ),
+                  )}
                 </View>
               </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>한줄평</Text>
-                <TextInput
-                  value={summaryLine}
-                  onChangeText={setSummaryLine}
-                  placeholder="예: 배부른데 시켜서 후회"
-                  placeholderTextColor={colors.placeholder}
-                  {...koreanTextInputProps}
-                  style={[
-                    styles.input,
-                    {
-                      borderColor: colors.borderInput,
-                      backgroundColor: colors.inputBg,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>태그</Text>
-                <View style={styles.equalChipRow}>
-                  {MEAL_TAG_PRESETS.map((tag) => (
-                    <Chip
-                      key={tag}
-                      compact
-                      soft
-                      style={[styles.equalChipCell, styles.softChipCell]}
-                      label={tag}
-                      active={tagsText.split(',').some((t) => t.trim() === tag)}
-                      onPress={() => toggleMealTag(tag)}
-                    />
-                  ))}
-                </View>
-                <View style={[styles.equalChipRow, styles.tagPresetSecondRow]}>
-                  {TAG_PRESETS.map((tag) => (
-                    <Chip
-                      key={tag}
-                      compact
-                      soft
-                      style={[styles.equalChipCell, styles.softChipCell]}
-                      label={tag}
-                      active={tagsText.split(',').some((t) => t.trim() === tag)}
-                      onPress={() => togglePresetTag(tag)}
-                    />
-                  ))}
-                </View>
-                <TextInput
-                  value={tagsText}
-                  onChangeText={setTagsText}
-                  placeholder="쉼표로 구분"
-                  placeholderTextColor={colors.placeholder}
-                  {...koreanTextInputProps}
-                  style={[
-                    styles.input,
-                    {
-                      borderColor: colors.borderInput,
-                      backgroundColor: colors.inputBg,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-              </View>
+              <TextInput
+                value={tagsText}
+                onChangeText={setTagsText}
+                placeholder="직접 입력 · 쉼표로 구분"
+                placeholderTextColor={addColors.textMuted}
+                onFocus={() => setTagsFocused(true)}
+                onBlur={() => setTagsFocused(false)}
+                {...koreanTextInputProps}
+                style={[
+                  styles.addMemoInput,
+                  {
+                    borderColor: tagsFocused ? addColors.accent : addColors.inputBorder,
+                    backgroundColor: addColors.surface,
+                    color: addColors.text,
+                  },
+                ]}
+              />
             </View>
           </View>
         ) : null}
@@ -973,30 +1093,40 @@ export default function AddExpenseScreen() {
         {step === 3 ? (
           <View
             style={[
-              styles.contextCardShell,
-              { borderColor: colors.border, backgroundColor: colors.surface },
-              !isDark && styles.contextCardShadow,
+              styles.addSheet,
+              { borderColor: addColors.border, backgroundColor: addColors.surface },
             ]}
           >
-            <View style={[styles.contextAccent, { backgroundColor: colors.accentCta }]} />
-            <View style={styles.contextCardBody}>
-              <Text style={[styles.contextKicker, { color: colors.textMuted }]}>확인</Text>
-              <Text style={[styles.contextTitle, { color: colors.text }]}>이대로 저장할까요?</Text>
-              <Text style={[styles.confirmHint, { color: colors.textMuted }]}>
+            <View>
+              <Text style={[styles.addStepTitle, { color: addColors.text }]}>이대로 저장할까요?</Text>
+              <Text style={[styles.addStepHelper, { color: addColors.textSecondary }]}>
                 수정할 항목을 누르면 해당 단계로 이동해요.
               </Text>
-              <View style={{ height: 12 }} />
-              {renderConfirmEditRow('금액', `₩${amount.toLocaleString()}`, 0)}
-              {renderConfirmEditRow('품목', item.trim() || '—', 0)}
-              {renderConfirmEditRow('카테고리', categoryLabel, 0)}
-              {renderConfirmEditRow('시간', formatDateTime(spentAt), 1, colors.textSec)}
-              {renderConfirmEditRow('이유', reasonPreview, 2, colors.textSec)}
-              {renderConfirmEditRow('기분', moodLabel, 2, colors.textSec)}
+            </View>
+            <View>
+              {renderConfirmEditRow('금액', `₩${amount.toLocaleString()}`, 0, addColors.text, '700')}
+              {renderConfirmEditRow('품목', item.trim() || '—', 0, addColors.text)}
+              {renderConfirmEditRow('카테고리', categoryLabel, 0, addColors.text, '600')}
+              {renderConfirmEditRow('시간', formatDateTime(spentAt), 1, addColors.text)}
+              {renderConfirmEditRow(
+                '사진',
+                photos.length > 0 ? `${photos.length}장 · 첫 장이 대표` : '없음',
+                1,
+                addColors.text,
+              )}
+              {renderConfirmEditRow('이유', reasonPreview, 2, addColors.text)}
               {summaryLine.trim()
-                ? renderConfirmEditRow('한줄평', summaryLine.trim(), 2, colors.textSec)
+                ? renderConfirmEditRow('한줄평', summaryLine.trim(), 2, addColors.text)
                 : null}
-              {renderConfirmEditRow('태그', tagsText.trim() || '—', 2, colors.textSec)}
-              <Text style={[styles.bottomSub, { color: colors.textMuted, marginTop: 14 }]}>
+              {renderConfirmEditRow('태그', tagsText.trim() || '—', 2, addColors.text)}
+            </View>
+            <View
+              style={[
+                styles.addInfoNote,
+                { backgroundColor: addColors.infoMint, borderColor: addColors.infoBorder },
+              ]}
+            >
+              <Text style={[styles.addInfoNoteText, { color: addColors.textSecondary }]}>
                 저장하면 다음 날 0시부터 47시간 59분 안에 평가할 수 있어요. 알림은 설정한 시간에 보내드려요.
               </Text>
             </View>
@@ -1007,18 +1137,18 @@ export default function AddExpenseScreen() {
       </ScrollView>
 
       {showDatePicker && Platform.OS === 'web' && (
-          <View style={styles.webDatePanel}>
-            <View style={styles.datePickerHeader}>
+          <View style={[styles.webDatePanel, { backgroundColor: addColors.surface, borderColor: addColors.border }]}>
+            <View style={[styles.datePickerHeader, { backgroundColor: addColors.surface, borderBottomColor: addColors.border }]}>
               <Pressable onPress={handleDatePickerCancel}>
-                <Text style={styles.datePickerCancel}>
+                <Text style={[styles.datePickerCancel, { color: addColors.textMuted }]}>
                   {datePickerPhase === 'time' ? '이전' : '취소'}
                 </Text>
               </Pressable>
-              <Text style={styles.datePickerTitle}>
+              <Text style={[styles.datePickerTitle, { color: addColors.text }]}>
                 {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
               </Text>
               <Pressable onPress={handleDatePickerConfirm}>
-                <Text style={styles.datePickerConfirm}>
+                <Text style={[styles.datePickerConfirm, { color: addColors.accent }]}>
                   {datePickerPhase === 'date' ? '다음' : '완료'}
                 </Text>
               </Pressable>
@@ -1074,18 +1204,18 @@ export default function AddExpenseScreen() {
           <Modal transparent animationType="slide" onRequestClose={handleDatePickerCancel}>
             <View style={styles.datePickerContainer}>
               <Pressable style={styles.datePickerBackdrop} onPress={handleDatePickerCancel} />
-              <View style={styles.datePickerContent}>
-                <View style={styles.datePickerHeader}>
+              <View style={[styles.datePickerContent, { backgroundColor: addColors.surface }]}>
+                <View style={[styles.datePickerHeader, { backgroundColor: addColors.surface, borderBottomColor: addColors.border }]}>
                   <Pressable onPress={handleDatePickerCancel}>
-                    <Text style={styles.datePickerCancel}>
+                    <Text style={[styles.datePickerCancel, { color: addColors.textMuted }]}>
                       {datePickerPhase === 'time' ? '이전' : '취소'}
                     </Text>
                   </Pressable>
-                  <Text style={styles.datePickerTitle}>
+                  <Text style={[styles.datePickerTitle, { color: addColors.text }]}>
                     {datePickerPhase === 'date' ? '날짜 선택' : '시간 선택'}
                   </Text>
                   <Pressable onPress={handleDatePickerConfirm}>
-                    <Text style={styles.datePickerConfirm}>
+                    <Text style={[styles.datePickerConfirm, { color: addColors.accent }]}>
                       {datePickerPhase === 'date' ? '다음' : '완료'}
                     </Text>
                   </Pressable>
@@ -1097,6 +1227,7 @@ export default function AddExpenseScreen() {
                     onChange={setTempSpentAt}
                     textColor={colors.text}
                     themeVariant={isDark ? 'dark' : 'light'}
+                    accentColor={addColors.accent}
                   />
                 </View>
               </View>
@@ -1131,7 +1262,10 @@ export default function AddExpenseScreen() {
                 <Pressable style={styles.pasteModalSecondary} onPress={fillPasteFromClipboard}>
                   <Text style={styles.pasteModalSecondaryText}>클립보드</Text>
                 </Pressable>
-                <Pressable style={styles.pasteModalPrimary} onPress={applyPaste}>
+                <Pressable
+                  style={[styles.pasteModalPrimary, { backgroundColor: addColors.cta }]}
+                  onPress={applyPaste}
+                >
                   <Text style={styles.pasteModalPrimaryText}>적용</Text>
                 </Pressable>
               </View>
@@ -1140,12 +1274,38 @@ export default function AddExpenseScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal
+        visible={formNotice != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFormNotice(null)}
+      >
+        <View style={styles.addNoticeBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setFormNotice(null)} />
+          <View style={[styles.addNoticeCard, { backgroundColor: addColors.surface }]}>
+            <Text style={[styles.addNoticeTitle, { color: addColors.text }]}>입력 확인</Text>
+            <Text style={[styles.addNoticeMessage, { color: addColors.textSecondary }]}>
+              {formNotice}
+            </Text>
+            <Pressable
+              onPress={() => setFormNotice(null)}
+              style={({ pressed }) => [
+                styles.addNoticeButton,
+                { backgroundColor: addColors.cta, opacity: pressed ? 0.92 : 1 },
+              ]}
+            >
+              <Text style={[styles.addNoticeButtonText, { color: addColors.onPrimary }]}>확인</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       <View
         style={[
           styles.bottomBar,
           {
-            borderTopColor: colors.border,
-            backgroundColor: colors.surface,
+            borderTopColor: addColors.border,
+            backgroundColor: addColors.bg,
             paddingBottom: Math.max(insets.bottom, 10),
           },
         ]}
@@ -1155,33 +1315,41 @@ export default function AddExpenseScreen() {
             onPress={goBack}
             style={({ pressed }) => [
               styles.navGhost,
-              { borderColor: colors.border, backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.88 : 1 },
+              { borderColor: addColors.border, backgroundColor: addColors.surface, opacity: pressed ? 0.94 : 1 },
             ]}
           >
-            <Text style={[styles.navGhostText, { color: colors.text }]}>이전</Text>
+            <Text style={[styles.navGhostText, { color: addColors.text }]}>이전</Text>
           </Pressable>
-        ) : (
-          <View style={{ width: 76 }} />
-        )}
-        <View style={{ flex: 1, minWidth: 0, paddingHorizontal: 8 }}>
-          <Text style={[styles.bottomHint, { color: colors.text }]} numberOfLines={1}>
-            {step === LAST_STEP
-              ? '확인 후 저장'
-              : amount > 0
-                ? `₩${amount.toLocaleString()}`
-                : ''}
-          </Text>
-          {item.trim() && step !== LAST_STEP ? (
-            <Text style={[styles.bottomSub, { color: colors.textSec }]} numberOfLines={1}>
-              {item.trim()}
+        ) : null}
+        {step > 0 ? (
+          <View style={{ flex: 1, minWidth: 0, paddingHorizontal: 8 }}>
+            <Text style={[styles.addFooterHint, { color: addColors.text }]} numberOfLines={1}>
+              {step === LAST_STEP
+                ? '확인 후 저장'
+                : amount > 0
+                  ? `₩${amount.toLocaleString()}`
+                  : ''}
             </Text>
-          ) : null}
-        </View>
+            {item.trim() && step !== LAST_STEP ? (
+              <Text style={[styles.addFooterSub, { color: addColors.textSecondary }]} numberOfLines={1}>
+                {item.trim()}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
         <PrimaryButton
           label={step === LAST_STEP ? (saving ? '저장 중...' : '저장') : '다음'}
           onPress={step === LAST_STEP ? onSave : goNext}
           disabled={step === LAST_STEP ? saving || !canSave : saving}
-          style={{ minWidth: 112, height: 48, borderRadius: 14 }}
+          textColor={addColors.onPrimary}
+          style={{
+            minWidth: 112,
+            height: 48,
+            borderRadius: 12,
+            flex: step === 0 ? 1 : undefined,
+            flexShrink: 0,
+            backgroundColor: addColors.cta,
+          }}
         />
       </View>
       </KeyboardAvoidingView>
@@ -1189,471 +1357,3 @@ export default function AddExpenseScreen() {
     </SafeAreaView>
   );
 }
-
-function parseAmount(raw: string) {
-  const cleaned = raw.replace(/[^\d]/g, '');
-  if (!cleaned) return 0;
-  return Number(cleaned);
-}
-
-function unformat(s: string) {
-  return s.replace(/[^\d]/g, '');
-}
-
-function formatAmountInput(s: string) {
-  const n = parseAmount(s);
-  if (!s) return '';
-  return n.toLocaleString();
-}
-
-function toKoreanMoney(v: number) {
-  if (v >= 10000) return `${v / 10000}만`;
-  return `${v.toLocaleString()}`;
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  container: { flex: 1 },
-  screenHeader: {
-    overflow: 'hidden',
-    zIndex: 10,
-    ...Platform.select({
-      android: { elevation: 8 },
-      default: {},
-    }),
-  },
-  screenHeaderInner: { paddingHorizontal: 14, paddingBottom: 14 },
-  pageBody: {
-    flex: 1,
-    marginTop: 8,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#0f172a',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-      },
-      android: { elevation: 6 },
-      default: {},
-    }),
-  },
-  pageBodyInner: { flex: 1 },
-  stepStripOnHeader: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    borderRadius: 12,
-    padding: 4,
-    gap: 2,
-    marginTop: 10,
-  },
-  content: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 20, gap: 12 },
-  contentNoScroll: { flexGrow: 1, justifyContent: 'flex-start' },
-  h1: { fontSize: 17, fontWeight: '900' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  headerActionText: { fontSize: 11, fontWeight: '800' },
-
-  label: { fontSize: 13, fontWeight: '900', color: '#6B7280', marginBottom: 8 },
-  amountInput: {
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#111827',
-  },
-
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '900', color: '#111827' },
-  sectionTitleSmall: { fontSize: 14, fontWeight: '900', color: '#6B7280' },
-  timingTitle: { fontWeight: '900', fontSize: 13, marginBottom: 4 },
-  timingBody: { fontWeight: '600', fontSize: 11, lineHeight: 16 },
-  fieldHint: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-
-  categoryRowCompact: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    maxWidth: '32%',
-    flexGrow: 1,
-  },
-  categoryPillActive: {
-    borderColor: '#77A7FF',
-    backgroundColor: '#E8F1FF',
-  },
-  categoryPillEmoji: { fontSize: 14 },
-  categoryPillText: { fontWeight: '800', color: '#111827', fontSize: 12, flexShrink: 1 },
-  categoryPillTextActive: { color: '#1D4ED8' },
-
-  // 기존 grid 스타일 (하위호환)
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  gridItem: {
-    width: '31%', minHeight: 72, backgroundColor: '#fff',
-    borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB',
-    alignItems: 'center', justifyContent: 'center', gap: 6,
-  },
-  gridItemActive: { borderColor: '#77A7FF', backgroundColor: '#E8F1FF' },
-  gridEmoji: { fontSize: 22 },
-  gridText: { fontWeight: '900', color: '#111827', fontSize: 13 },
-  gridTextActive: { color: '#1D4ED8' },
-
-  moreToggle: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 14,
-    alignItems: 'center',
-  },
-  moreText: { fontWeight: '900', color: '#2563EB' },
-
-  contextCardShell: {
-    flexDirection: 'row',
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  contextCardShadow: Platform.select({
-    ios: {
-      shadowColor: '#0f172a',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.07,
-      shadowRadius: 18,
-    },
-    android: { elevation: 4 },
-    default: {},
-  }),
-  contextAccent: { width: 4 },
-  contextCardBody: { flex: 1, padding: 12, gap: 8 },
-  contextCardBodySpacious: { paddingVertical: 14, paddingHorizontal: 14, gap: 4 },
-  contextKicker: { fontSize: 11, fontWeight: '800' },
-  contextTitle: { marginTop: 2, fontSize: 18, fontWeight: '900' },
-  contextHint: { marginTop: 2, fontSize: 11, fontWeight: '600', lineHeight: 16 },
-  stepTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 6,
-  },
-  stepTitleMain: { flex: 1, minWidth: 0 },
-  contextHintRight: {
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 14,
-    textAlign: 'right',
-    flexShrink: 0,
-    maxWidth: 96,
-    marginTop: 2,
-  },
-
-  fieldBlock: { gap: 10, marginTop: 14 },
-  fieldLabel: { fontSize: 12, fontWeight: '800', letterSpacing: -0.2, marginBottom: 2 },
-  equalChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  tagPresetSecondRow: { marginTop: 8 },
-  equalChipCell: { flex: 1, minWidth: 0 },
-  softChipCell: { borderRadius: 16 },
-  stepChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    paddingVertical: 6,
-    paddingHorizontal: 2,
-    borderRadius: 999,
-    borderWidth: 1,
-    minWidth: 0,
-  },
-  stepChipNum: { fontSize: 10, fontWeight: '900' },
-  stepChipLabel: { fontSize: 10, fontWeight: '800', letterSpacing: -0.3, flexShrink: 1 },
-
-  labelThemed: { fontSize: 11, fontWeight: '800', marginBottom: 4, marginTop: 2 },
-
-  confirmRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  confirmHint: { fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 6 },
-  confirmKey: { fontSize: 13, fontWeight: '700', width: 72 },
-  confirmValWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 4,
-  },
-  confirmVal: { flexShrink: 1, fontSize: 14, fontWeight: '700', textAlign: 'right' },
-
-  extrasToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 8,
-  },
-  extrasToggleTitle: { fontSize: 15, fontWeight: '900' },
-  extrasToggleSub: { marginTop: 2, fontSize: 12, fontWeight: '600' },
-
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-
-  photoAttachRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  attachButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  attachButtonText: { fontWeight: '800', color: '#374151', fontSize: 13 },
-  photoDeleteBtn: {
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  clearPhoto: { fontWeight: '800', color: '#DC2626', fontSize: 13 },
-  photoPreviewWrap: {
-    marginTop: 2,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  photoPreviewLoading: { height: 80 },
-
-  input: {
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    fontWeight: Platform.OS === 'ios' ? '400' : '700',
-    color: '#111827',
-  },
-
-  bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  navGhost: {
-    width: 76,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navGhostText: { fontSize: 15, fontWeight: '800' },
-  bottomHint: { fontWeight: '900', color: '#111827', fontSize: 16 },
-  bottomSub: { marginTop: 4, color: '#6B7280', fontWeight: '700', fontSize: 12 },
-  reasonGroupTitle: {
-    fontWeight: '900',
-    color: '#4B5563',
-    fontSize: 13,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  closeButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-  },
-  closeButtonText: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  scanButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#E8F1FF',
-    borderWidth: 1,
-    borderColor: '#77A7FF',
-    minWidth: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanButtonText: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  pasteButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  pasteButtonText: {
-    fontWeight: '900',
-    color: '#374151',
-    fontSize: 13,
-  },
-  pasteModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  pasteModalSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 28,
-    maxHeight: '88%',
-  },
-  pasteModalTitle: { fontSize: 17, fontWeight: '900', color: '#111827', marginBottom: 8 },
-  pasteModalHint: { fontSize: 13, color: '#6B7280', fontWeight: '600', marginBottom: 12, lineHeight: 18 },
-  pasteModalInput: {
-    minHeight: 160,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 12,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  pasteModalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' },
-  pasteModalSecondary: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-  },
-  pasteModalSecondaryText: { fontWeight: '800', color: '#4B5563', fontSize: 14 },
-  pasteModalPrimary: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#2563EB',
-  },
-  pasteModalPrimaryText: { fontWeight: '900', color: '#fff', fontSize: 14 },
-  dateButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
-  },
-  dateButtonText: {
-    fontWeight: '800',
-    color: '#111827',
-    fontSize: 14,
-  },
-  datePickerContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  datePickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  datePickerContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
-  },
-  datePickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  datePickerCancel: {
-    fontWeight: '700',
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  datePickerTitle: {
-    fontWeight: '900',
-    color: '#111827',
-    fontSize: 16,
-  },
-  datePickerConfirm: {
-    fontWeight: '900',
-    color: '#2563EB',
-    fontSize: 14,
-  },
-  webDateTimeWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  webDateTimeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6B7280',
-    marginBottom: 6,
-  },
-  webDatePreview: {
-    marginTop: 14,
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#111827',
-    lineHeight: 20,
-  },
-  webDatePanel: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-  },
-});

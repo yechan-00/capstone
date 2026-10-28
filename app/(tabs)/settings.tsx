@@ -11,6 +11,8 @@ import {
   Switch,
   Modal,
   Pressable,
+  Linking,
+  AppState,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -24,6 +26,7 @@ import { SettingsCard } from '@/components/SettingsCard';
 import { SettingsRow } from '@/components/SettingsRow';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { CenterNoticeModal } from '@/components/CenterNoticeModal';
+import { ShareNotificationsModal } from '@/components/ShareNotificationsModal';
 import { Chip } from '@/components/Chip';
 import {
   DEFAULT_REVIEW_REMINDER_TIME,
@@ -33,7 +36,12 @@ import {
 } from '@/lib/accountSettings';
 import { formatRegretPatternAlertSummary } from '@/lib/regretPatternAlert';
 import { disableRegretPatternAlerts } from '@/services/regretPatternAlertService';
+import {
+  ensurePermissionToEnablePatternAlerts,
+  getNotificationPermissionKind,
+} from '@/services/notificationService';
 import AlarmTimeWheel from '@/components/AlarmTimeWheel';
+import { userNotificationService } from '@/services/userNotificationService';
 
 type IncomeUnit = 'base' | 'man' | 'baekman';
 
@@ -67,6 +75,8 @@ export default function SettingsScreen() {
   const [pendingTime, setPendingTime] = useState<Date>(() => new Date());
   const [saving, setSaving] = useState(false);
   const [notificationSaved, setNotificationSaved] = useState(false);
+  const [shareNotifVisible, setShareNotifVisible] = useState(false);
+  const [shareUnreadCount, setShareUnreadCount] = useState(0);
   const [incomeAmount, setIncomeAmount] = useState(
     account?.monthlyIncomeAmount?.toString() || '0'
   );
@@ -98,16 +108,39 @@ export default function SettingsScreen() {
   const budgetPeriodInitRef = useRef(false);
   const reminderInitRef = useRef(false);
   const regretPatternInitRef = useRef(false);
+  const patternAlertBusyRef = useRef(false);
+  const [patternAlertBusy, setPatternAlertBusy] = useState(false);
   const paydayInputRef = useRef<TextInput>(null);
 
   useFocusEffect(
     React.useCallback(() => {
       isFocusedRef.current = true;
+      void getNotificationPermissionKind();
+      if (user?.uid && !isGuest) {
+        void userNotificationService
+          .countUnread(user.uid)
+          .then(setShareUnreadCount)
+          .catch((err) => {
+            console.warn('[share-notif] unread count skipped:', err?.code || err?.message || err);
+            setShareUnreadCount(0);
+          });
+      } else {
+        setShareUnreadCount(0);
+      }
       return () => {
         isFocusedRef.current = false;
       };
-    }, [])
+    }, [isGuest, user?.uid]),
   );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void getNotificationPermissionKind();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const t = resolveReviewReminderTime(account);
@@ -208,8 +241,39 @@ export default function SettingsScreen() {
     }
   };
 
+  const restoreRegretPatternSwitch = () => {
+    setRegretPatternAlertEnabled(resolveRegretPatternAlertEnabled(account));
+  };
+
   const saveRegretPatternAlert = async (enabled: boolean) => {
+    if (patternAlertBusyRef.current) return;
+    patternAlertBusyRef.current = true;
+    setPatternAlertBusy(true);
     try {
+      if (enabled) {
+        const permission = await ensurePermissionToEnablePatternAlerts();
+        if (permission === 'denied') {
+          restoreRegretPatternSwitch();
+          Alert.alert(
+            '알림 권한',
+            '알림 권한이 꺼져 있어요. 설정에서 허용한 뒤 다시 켜 주세요.',
+            [
+              { text: '닫기', style: 'cancel' },
+              { text: '시스템 설정 열기', onPress: () => void Linking.openSettings() },
+            ],
+          );
+          return;
+        }
+        if (permission === 'request_denied') {
+          restoreRegretPatternSwitch();
+          Alert.alert(
+            '후회 패턴 알림',
+            '알림 권한이 필요해요. 허용하지 않으면 예방 알림을 켜 둘 수 없어요.',
+          );
+          return;
+        }
+      }
+
       setSaving(true);
       await updateRegretPatternAlertSettings(enabled);
       if (!enabled && account?.id) {
@@ -218,9 +282,12 @@ export default function SettingsScreen() {
       setNotificationSaved(true);
       setTimeout(() => setNotificationSaved(false), 2000);
     } catch {
+      restoreRegretPatternSwitch();
       Alert.alert('후회 패턴 알림', '저장에 실패했습니다.');
     } finally {
       setSaving(false);
+      patternAlertBusyRef.current = false;
+      setPatternAlertBusy(false);
     }
   };
 
@@ -364,6 +431,7 @@ export default function SettingsScreen() {
       regretPatternInitRef.current = true;
       return;
     }
+    if (patternAlertBusyRef.current) return;
     if (regretPatternAlertEnabled === resolveRegretPatternAlertEnabled(account)) return;
     void saveRegretPatternAlert(regretPatternAlertEnabled);
   }, [regretPatternAlertEnabled, account?.id], 500);
@@ -659,6 +727,20 @@ export default function SettingsScreen() {
           paddingHorizontal: 16,
           minHeight: 120,
         },
+        unreadBadge: {
+          minWidth: 22,
+          height: 22,
+          borderRadius: 11,
+          backgroundColor: colors.accentCta,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 6,
+        },
+        unreadBadgeText: {
+          fontSize: 11,
+          fontWeight: '800',
+          color: '#fff',
+        },
       }),
     [colors]
   );
@@ -877,6 +959,7 @@ export default function SettingsScreen() {
               <Switch
                 value={regretPatternAlertEnabled}
                 onValueChange={setRegretPatternAlertEnabled}
+                disabled={saving || patternAlertBusy}
                 trackColor={{ false: colors.border, true: colors.accentCta }}
                 thumbColor="#fff"
                 ios_backgroundColor={colors.border}
@@ -891,6 +974,19 @@ export default function SettingsScreen() {
               인사이트 데이터가 갱신되면 알림 일정이 자동으로 맞춰져요.
             </Text>
           </View>
+          <SettingsRow
+            icon="forum"
+            title="공유 알림"
+            subtitle="공유 링크에 달린 코멘트를 확인해요"
+            onPress={() => setShareNotifVisible(true)}
+            rightElement={
+              shareUnreadCount > 0 ? (
+                <View style={styles.unreadBadge}>
+                  <Text style={styles.unreadBadgeText}>{shareUnreadCount > 99 ? '99+' : shareUnreadCount}</Text>
+                </View>
+              ) : undefined
+            }
+          />
           {Platform.OS === 'android' && showTimePicker && reviewReminderEnabled && (
             <DateTimePicker
               value={timeValue}
@@ -1157,6 +1253,13 @@ export default function SettingsScreen() {
       title="오류"
       message={logoutError ?? ''}
       onClose={() => setLogoutError(null)}
+    />
+
+    <ShareNotificationsModal
+      visible={shareNotifVisible}
+      userId={user?.uid ?? null}
+      onClose={() => setShareNotifVisible(false)}
+      onUnreadChange={setShareUnreadCount}
     />
     </View>
   );

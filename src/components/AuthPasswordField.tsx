@@ -14,6 +14,15 @@ import { useTheme } from '@/theme/ThemeContext';
 
 export const PASSWORD_LABEL = '비밀번호';
 
+export type AuthPasswordFieldAppearance = {
+  borderColor: string;
+  borderFocusColor: string;
+  backgroundColor: string;
+  textColor: string;
+  placeholderColor: string;
+  iconColor: string;
+};
+
 type Props = Omit<TextInputProps, 'secureTextEntry' | 'placeholder'> & {
   value: string;
   onChangeText: (text: string) => void;
@@ -22,6 +31,7 @@ type Props = Omit<TextInputProps, 'secureTextEntry' | 'placeholder'> & {
   revealed?: boolean;
   onToggleReveal?: () => void;
   variant?: 'default' | 'card';
+  appearance?: AuthPasswordFieldAppearance;
 };
 
 const webNoAutofillProps =
@@ -62,6 +72,7 @@ export const AuthPasswordField = forwardRef<TextInput, Props>(function AuthPassw
     autoComplete,
     textContentType,
     variant = 'default',
+    appearance,
     ...rest
   },
   ref,
@@ -74,16 +85,24 @@ export const AuthPasswordField = forwardRef<TextInput, Props>(function AuthPassw
   const mask = isWeb ? !revealed && value.length > 0 : !revealed;
   const useWebMask = isWeb && mask;
 
+  const cardPalette = appearance ?? {
+    borderColor: AUTH.inputBorder,
+    borderFocusColor: AUTH.inputBorderFocus,
+    backgroundColor: AUTH.inputBg,
+    textColor: AUTH.brand,
+    placeholderColor: AUTH.placeholder,
+    iconColor: AUTH.textSub,
+  };
   const cardBorder = isCard
     ? focused
-      ? AUTH.inputBorderFocus
-      : AUTH.inputBorder
+      ? cardPalette.borderFocusColor
+      : cardPalette.borderColor
     : colors.borderInput;
-  const cardBg = isCard ? AUTH.inputBg : colors.inputBg;
-  const iconColor = isCard ? AUTH.textSub : colors.primary;
-  const hintColor = isCard ? AUTH.placeholder : colors.placeholder;
-  const textColor = isCard ? AUTH.brand : colors.text;
-  const eyeColor = isCard ? AUTH.textSub : colors.textMuted;
+  const cardBg = isCard ? cardPalette.backgroundColor : colors.inputBg;
+  const iconColor = isCard ? cardPalette.iconColor : colors.primary;
+  const hintColor = isCard ? cardPalette.placeholderColor : colors.placeholder;
+  const textColor = isCard ? cardPalette.textColor : colors.text;
+  const eyeColor = isCard ? cardPalette.iconColor : colors.textMuted;
 
   return (
     <View
@@ -96,8 +115,7 @@ export const AuthPasswordField = forwardRef<TextInput, Props>(function AuthPassw
           borderColor: isCard ? cardBorder : 'transparent',
           borderWidth: isCard ? 1 : 0,
         },
-        isCard && focused && isWeb && ({ boxShadow: `0 0 0 4px ${AUTH.focusRing}` } as object),
-        isCard && isWeb && ({ transition: 'border-color 0.15s ease, box-shadow 0.15s ease' } as object),
+        isCard && isWeb && ({ transition: 'border-color 0.15s ease' } as object),
       ]}
     >
       {!isCard ? (
@@ -146,10 +164,16 @@ export const AuthPasswordField = forwardRef<TextInput, Props>(function AuthPassw
         }}
       />
       {showToggle ? (
-        <TouchableOpacity onPress={onToggleReveal} style={styles.eyeBtn} accessibilityRole="button">
+        <TouchableOpacity
+          onPress={onToggleReveal}
+          style={isCard ? styles.eyeBtnCard : styles.eyeBtn}
+          accessibilityRole="button"
+          accessibilityLabel={revealed ? '비밀번호 숨기기' : '비밀번호 표시'}
+          hitSlop={isCard ? undefined : { top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <MaterialIcons
             name={revealed ? 'visibility' : 'visibility-off'}
-            size={20}
+            size={isCard ? 22 : 20}
             color={eyeColor}
           />
         </TouchableOpacity>
@@ -171,11 +195,12 @@ const styles = StyleSheet.create({
     minHeight: 54,
   },
   wrapCard: {
-    marginBottom: 14,
+    marginBottom: 0,
     paddingHorizontal: 16,
-    height: AUTH.inputHeight,
-    minHeight: AUTH.inputHeight,
-    borderRadius: AUTH.radius,
+    paddingRight: 6,
+    height: 56,
+    minHeight: 56,
+    borderRadius: 16,
     position: 'relative',
   },
   icon: { marginRight: 8 },
@@ -190,7 +215,7 @@ const styles = StyleSheet.create({
     left: 16,
     fontSize: 16,
     fontWeight: '400',
-    lineHeight: AUTH.inputHeight,
+    lineHeight: 56,
     zIndex: 1,
   },
   input: {
@@ -206,4 +231,10 @@ const styles = StyleSheet.create({
     WebkitTextSecurity: 'disc',
   } as object,
   eyeBtn: { padding: 4, marginLeft: 4 },
+  eyeBtnCard: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

@@ -202,3 +202,64 @@ export function buildRegretPatternHomeHeadline(
   }
   return `${parts.join(' · ')}에 후회가 많았어요 · 평소 구매 ${REGRET_PATTERN_ALERT_LEAD_MINUTES}분 전에 알림`;
 }
+
+export type HomeRegretPatternView = {
+  hasRecords: boolean;
+  hasPattern: boolean;
+  summary: string | null;
+};
+
+export function formatRegretPatternClock(hour: number, minute: number): string {
+  const period = hour < 12 ? '오전' : '오후';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${period} ${h12}:${String(minute).padStart(2, '0')}`;
+}
+
+/** 홈 카드용 분석 요약. qualifies 기준은 알림 슬롯과 동일. */
+export function buildHomeRegretPatternView(
+  weekdayInsights: WeekdayInsight[],
+  timeOfDayInsights: TimeOfDayInsight[],
+): HomeRegretPatternView {
+  const topWeekday = [...weekdayInsights]
+    .filter((w) => qualifies(w.totalCount, w.regretCount, w.regretRate))
+    .sort((a, b) => b.regretRate - a.regretRate || b.regretCount - a.regretCount)[0];
+  const topTime = [...timeOfDayInsights]
+    .filter((t) => qualifies(t.totalCount, t.regretCount, t.regretRate))
+    .sort((a, b) => b.regretRate - a.regretRate || b.regretCount - a.regretCount)[0];
+  const hasRecords = weekdayInsights.some((w) => w.totalCount > 0);
+
+  if (!topWeekday && !topTime) {
+    return { hasRecords, hasPattern: false, summary: null };
+  }
+
+  if (topWeekday && topTime) {
+    return {
+      hasRecords,
+      hasPattern: true,
+      summary: `${weekdayLabel(topWeekday.weekday)}요일 ${TIME_OF_DAY_LABELS[topTime.timeOfDay]}에 후회가 잦아요`,
+    };
+  }
+  if (topWeekday) {
+    return {
+      hasRecords,
+      hasPattern: true,
+      summary: `${weekdayLabel(topWeekday.weekday)}요일에 후회가 잦아요`,
+    };
+  }
+  return {
+    hasRecords,
+    hasPattern: true,
+    summary: `${TIME_OF_DAY_LABELS[topTime!.timeOfDay]}에 후회가 잦아요`,
+  };
+}
+
+/** 실제 저장된 슬롯만 표시. 빈 배열이면 예약 시간을 만들지 않음. */
+export function formatRegretPatternScheduledTimes(slots: RegretPatternAlertSlot[]): string[] {
+  return slots.map((slot) => {
+    const clock = formatRegretPatternClock(slot.hour, slot.minute);
+    if (slot.kind === 'weekday' && slot.weekday != null) {
+      return `매주 ${weekdayLabel(slot.weekday)}요일 ${clock}`;
+    }
+    return `매일 ${clock}`;
+  });
+}

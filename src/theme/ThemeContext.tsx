@@ -17,6 +17,8 @@ export type ThemeColors = {
   bg: string; surface: string; surfaceMuted: string;
   text: string; textSec: string; textMuted: string;
   border: string; borderInput: string;
+  /** 고정 헤더가 스크롤된 뒤에만 보이는 하단 구분선 */
+  headerDivider: string;
   primary: string; primaryDark: string; onPrimary: string;
   tabActive: string; tabInactive: string; tabBarBg: string; tabBarBorder: string;
   headerBg: string; headerGradientStart: string; headerGradientEnd: string; headerTint: string;
@@ -41,11 +43,13 @@ export const DEFAULT_PRESETS: AccentPreset[] = [];
 export const NAVY_PRESET: AccentPreset = { key: 'navy', label: '네이비', color: '#1a2d4a' };
 
 /** 브랜드 그린 (기본) */
-export const GREEN_PRESET: AccentPreset = { key: 'green', label: '그린', color: '#34C36F' };
+export const GREEN_PRESET: AccentPreset = { key: 'green', label: '그린', color: '#34785F' };
 
-export const BRAND_GREEN = '#34C36F';
-export const BRAND_GREEN_DARK = '#2AAD5C';
-export const BRAND_GREEN_LIGHT = '#E8F8EE';
+export const BRAND_GREEN = '#34785F';
+export const BRAND_GREEN_DARK = '#28624D';
+export const BRAND_GREEN_LIGHT = '#EAF5EE';
+export const BRAND_GREEN_SURFACE = '#F2F8F4';
+const LEGACY_DEFAULT_GREENS = new Set(['#34C36F', '#2AAD5C', '#34c36f', '#2aad5c']);
 
 export function isCustomHex(key: string): boolean {
   return key.startsWith('#');
@@ -55,7 +59,7 @@ export function isCustomHex(key: string): boolean {
 const darkBase: ThemeColors = {
   bg: '#0B0F0E', surface: '#151A19', surfaceMuted: '#1E2624',
   text: '#F1F5F4', textSec: '#A8B5B0', textMuted: '#6B7A74',
-  border: '#2A3430', borderInput: '#33403C',
+  border: '#2A3430', borderInput: '#33403C', headerDivider: '#2A3430',
   primary: BRAND_GREEN, primaryDark: BRAND_GREEN_DARK, onPrimary: '#0B0F0E',
   tabActive: BRAND_GREEN, tabInactive: '#6B7A74',
   tabBarBg: '#151A19', tabBarBorder: '#2A3430',
@@ -77,26 +81,26 @@ const darkBase: ThemeColors = {
 
 // ── 라이트 기본 팔레트 ────────────────────────────────
 const lightBase: ThemeColors = {
-  bg: '#F5F7F4', surface: '#ffffff', surfaceMuted: '#EEF2EE',
-  text: '#1A2E24', textSec: '#4A5C52', textMuted: '#7A8A82',
-  border: '#E2EAE5', borderInput: '#D5E0DA',
+  bg: '#F7F9F7', surface: '#ffffff', surfaceMuted: '#F1F4F2',
+  text: '#20352B', textSec: '#60736A', textMuted: '#82918A',
+  border: '#E5EBE7', borderInput: '#D9E2DC', headerDivider: '#E8ECE8',
   primary: BRAND_GREEN, primaryDark: BRAND_GREEN_DARK, onPrimary: '#ffffff',
-  tabActive: BRAND_GREEN, tabInactive: '#9AA8A0',
-  tabBarBg: '#ffffff', tabBarBorder: '#E8EEEA',
-  headerBg: '#F5F7F4', headerGradientStart: '#ffffff', headerGradientEnd: '#ffffff',
-  headerTint: '#1A2E24',
-  chipInactiveBg: '#F0F4F1', chipActiveBg: BRAND_GREEN,
-  chipInactiveBorder: '#E2EAE5', chipActiveBorder: BRAND_GREEN,
-  chipTextInactive: '#1A2E24', chipTextActive: '#ffffff',
-  catPill: '#E8F0EA', gridActiveBg: BRAND_GREEN_LIGHT, gridActiveBorder: BRAND_GREEN, gridTextActive: BRAND_GREEN_DARK,
-  pillBg: '#EEF2EE', pillActiveBg: BRAND_GREEN_LIGHT, pillActiveBorder: '#B8E6C8',
-  pillText: '#4A5C52', pillTextActive: BRAND_GREEN_DARK,
+  tabActive: BRAND_GREEN, tabInactive: '#82918A',
+  tabBarBg: '#ffffff', tabBarBorder: '#E5EBE7',
+  headerBg: '#F7F9F7', headerGradientStart: '#ffffff', headerGradientEnd: '#ffffff',
+  headerTint: '#20352B',
+  chipInactiveBg: '#F1F4F2', chipActiveBg: BRAND_GREEN,
+  chipInactiveBorder: '#E5EBE7', chipActiveBorder: BRAND_GREEN,
+  chipTextInactive: '#20352B', chipTextActive: '#ffffff',
+  catPill: '#EAF5EE', gridActiveBg: BRAND_GREEN_LIGHT, gridActiveBorder: BRAND_GREEN, gridTextActive: BRAND_GREEN_DARK,
+  pillBg: '#F1F4F2', pillActiveBg: BRAND_GREEN_LIGHT, pillActiveBorder: '#C5DDD0',
+  pillText: '#60736A', pillTextActive: BRAND_GREEN_DARK,
   choiceBg: '#ffffff', choiceActiveBg: BRAND_GREEN_LIGHT, choiceActiveBorder: BRAND_GREEN, choiceTextActive: BRAND_GREEN_DARK,
-  accentBlue: '#2AAD5C', accentCta: BRAND_GREEN, keyFindingBg: '#1A2E24',
+  accentBlue: BRAND_GREEN, accentCta: BRAND_GREEN, keyFindingBg: '#1A2E24',
   offlineBg: '#FFF3CD', offlineBorder: '#FFE69C', offlineText: '#856404',
   logoutBorder: '#FCA5A5', logoutText: '#B91C1C', errorText: '#FF6B6B',
-  inputBg: '#F8FAF8', placeholder: '#9AA8A0', addTabLabel: '#4A5C52', emptyIcon: '#B4C0BA',
-  starColor: '#CA8A04', categoryLabelBg: '#EEF2EE', success: '#2AAD5C',
+  inputBg: BRAND_GREEN_SURFACE, placeholder: '#82918A', addTabLabel: '#60736A', emptyIcon: '#B4C0BA',
+  starColor: BRAND_GREEN, categoryLabelBg: '#F1F4F2', success: BRAND_GREEN,
 };
 
 function darken(hex: string): string {
@@ -158,16 +162,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     ]).then(([darkVal, accentVal, presetsVal, animVal]) => {
       if (!mounted) return;
       setIsDarkState(darkVal === '1');
-      if (accentVal) setAccentKeyState(accentVal);
+      if (accentVal) {
+        setAccentKeyState(LEGACY_DEFAULT_GREENS.has(accentVal) ? BRAND_GREEN : accentVal);
+      }
       // 기본값 true, 명시적으로 '0'일 때만 끔
       setAnimationsEnabledState(animVal !== '0');
       if (presetsVal) {
         try {
           const parsed: AccentPreset[] = JSON.parse(presetsVal);
-          // 네이비가 없으면 맨 앞에 추가
           const hasGreen = parsed.some(p => p.key === 'green');
           const hasNavy = parsed.some(p => p.key === 'navy');
-          let presets = parsed;
+          let presets = parsed.map((p) => (p.key === 'green' ? GREEN_PRESET : p));
           if (!hasGreen) presets = [GREEN_PRESET, ...presets];
           if (!hasNavy) presets = [...presets, NAVY_PRESET];
           setCustomPresets(presets);

@@ -72,7 +72,7 @@ export const WEB_LOCK_NOTIF_SHADOW = IS_WEB
 export const WEB_BELL_CIRCLE_SHADOW = IS_WEB
   ? ({ boxShadow: '0 4px 16px rgba(52,195,111,0.15)' } as object)
   : ({
-      shadowColor: '#34C36F',
+      shadowColor: '#34785F',
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.15,
       shadowRadius: 12,

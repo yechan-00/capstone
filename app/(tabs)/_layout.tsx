@@ -3,44 +3,28 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
-  Alert,
-  Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  useWindowDimensions,
   View,
-  ActivityIndicator,
 } from 'react-native';
-import { useTheme } from '@/theme/ThemeContext';
+import { BRAND_GREEN, useTheme } from '@/theme/ThemeContext';
 import Animated, {
-  Easing,
-  ZoomIn,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { QuickPresetModal, type QuickPreset } from '@/components/QuickPresetModal';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { type QuickPreset } from '@/components/QuickPresetModal';
+import { QuickInputSheet, type QuickPresetLoadState } from '@/components/QuickInputSheet';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/hooks/useAuth';
 import { useExpenses } from '@/hooks/useExpenses';
 import { PendingReviewCountProvider, usePendingReviewCount } from '@/hooks/usePendingReviewCount';
-import { MOODS, REASON_GROUPS } from '@/lib/expenseOptions';
-import { buildManualExpensePayload } from '@/services/expenseInput/manualExpensePayload';
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-// 말풍선 꼬리 높이 (이 높이만큼 추가 버튼 위로 띄움)
-const SHEET_TAIL_H = 14;
 
 // ── FAB ───────────────────────────────────────────────────
 function AddTabButton({
@@ -79,6 +63,92 @@ function AddTabButton({
   );
 }
 
+const QUICK_PRESETS_KEY = '@rw_quick_presets';
+
+function isQuickPresetItem(value: unknown): value is QuickPreset {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as { id?: unknown };
+  return typeof item.id === 'string' && item.id.length > 0;
+}
+
+function persistQuickPresets(next: QuickPreset[], canWrite: boolean) {
+  if (!canWrite) {
+    console.info('[quick-preset] storage write skipped', { reason: 'not-hydrated' });
+    return;
+  }
+  AsyncStorage.setItem(QUICK_PRESETS_KEY, JSON.stringify(next))
+    .then(() => {
+      console.info('[quick-preset] storage write success', { count: next.length });
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.info('[quick-preset] storage write failed', { error: message });
+    });
+}
+
+async function readQuickPresets(): Promise<{
+  status: Exclude<QuickPresetLoadState, 'loading'>;
+  presets: QuickPreset[];
+}> {
+  console.info('[quick-preset] storage read start');
+  try {
+    const raw = await AsyncStorage.getItem(QUICK_PRESETS_KEY);
+    const exists = raw != null;
+    const length = raw?.length ?? 0;
+    if (!exists) {
+      console.info('[quick-preset] storage read result', {
+        exists: false,
+        length: 0,
+        parseSuccess: true,
+        isArray: true,
+        count: 0,
+        itemsValid: true,
+      });
+      return { status: 'ready', presets: [] };
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const isArray = Array.isArray(parsed);
+      const count = isArray ? parsed.length : 0;
+      const itemsValid = isArray && parsed.every(isQuickPresetItem);
+      console.info('[quick-preset] storage read result', {
+        exists: true,
+        length,
+        parseSuccess: true,
+        isArray,
+        count,
+        itemsValid,
+      });
+      if (!isArray || !itemsValid) return { status: 'parse_error', presets: [] };
+      return { status: 'ready', presets: parsed as QuickPreset[] };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.info('[quick-preset] storage read result', {
+        exists: true,
+        length,
+        parseSuccess: false,
+        isArray: false,
+        count: 0,
+        itemsValid: false,
+        error: message,
+      });
+      return { status: 'parse_error', presets: [] };
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.info('[quick-preset] storage read result', {
+      exists: false,
+      length: 0,
+      parseSuccess: false,
+      isArray: false,
+      count: 0,
+      itemsValid: false,
+      error: message,
+    });
+    return { status: 'error', presets: [] };
+  }
+}
+
 function TabHeaderBackground({
   isDark, gradientStart, gradientEnd, solid,
 }: { isDark: boolean; gradientStart: string; gradientEnd: string; solid: string }) {
@@ -94,409 +164,10 @@ function TabHeaderBackground({
   return <View style={[StyleSheet.absoluteFill, { backgroundColor: solid, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E8EEEA' }]} />;
 }
 
-const TAG_PRESETS = ['야식', '데이트', '시발비용', '보상', '스트레스'] as const;
-const REASON_CHIPS = REASON_GROUPS[0].items;
-
-// ── 빠른 입력 바텀시트 ────────────────────────────────────
-function QuickInputSheet({
-  visible, onClose, quickPresets, handleDeletePreset, handleAddPreset,
-  colors, width, onSaved, account, createExpense,
-}: any) {
-  const insets = useSafeAreaInsets();
-  const { animationsEnabled } = useTheme();
-
-  const [selectedPreset, setSelectedPreset] = useState<QuickPreset | null>(null);
-  const [reasons, setReasons] = useState<string[]>([]);
-  const [mood, setMood] = useState<string | null>(null);
-  const [tagsText, setTagsText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [customReason, setCustomReason] = useState('');
-  const [quickEditMode, setQuickEditMode] = useState<'edit' | 'delete' | null>(null);
-  const [presetModalVisible, setPresetModalVisible] = useState(false);
-  const [editingPreset, setEditingPreset] = useState<QuickPreset | null>(null);
-
-  // 시트 닫힐 때 초기화
-  // 퇴장 애니메이션을 위해 visible과 별개로 렌더 유지 플래그를 둔다.
-  const [render, setRender] = useState(visible);
-
-  // 등장: 추가 버튼에서 솟아남 / 퇴장: 꼬리쪽으로 줄어들며 추가 버튼으로 빨려 들어감
-  const sheetOpen = useSharedValue(visible ? 1 : 0);
-  const backdropOpacity = useSharedValue(visible ? 1 : 0);
-
-  useEffect(() => {
-    if (visible) {
-      setRender(true);
-      if (!animationsEnabled) {
-        sheetOpen.value = 1;
-        backdropOpacity.value = 1;
-        return;
-      }
-      sheetOpen.value = 0;
-      backdropOpacity.value = 0;
-      backdropOpacity.value = withTiming(1, { duration: 220 });
-      sheetOpen.value = withSpring(1, { damping: 15, stiffness: 180, mass: 0.7 });
-    } else {
-      if (!animationsEnabled) {
-        setRender(false);
-        return;
-      }
-      backdropOpacity.value = withTiming(0, { duration: 200 });
-      sheetOpen.value = withTiming(
-        0,
-        { duration: 230, easing: Easing.in(Easing.cubic) },
-        (finished) => {
-          if (finished) runOnJS(setRender)(false);
-        },
-      );
-    }
-  }, [visible, animationsEnabled, sheetOpen, backdropOpacity]);
-
-  // 완전히 닫힌 뒤 입력값 초기화 (퇴장 애니메이션 중에는 유지)
-  useEffect(() => {
-    if (!render) {
-      setSelectedPreset(null);
-      setReasons([]);
-      setMood(null);
-      setTagsText('');
-      setCustomReason('');
-      setQuickEditMode(null);
-      setPresetModalVisible(false);
-      setEditingPreset(null);
-    }
-  }, [render]);
-
-  const sheetAnim = useAnimatedStyle(() => ({
-    opacity: sheetOpen.value,
-    transform: [
-      { scale: 0.3 + 0.7 * sheetOpen.value },
-      { translateY: (1 - sheetOpen.value) * 30 },
-    ],
-  }));
-
-  const backdropAnim = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
-
-  if (!render) return null;
-
-  // 탭바(하단 메뉴) 높이만큼만 띄워서, 시트 위로 흰 띠가 생기지 않게 한다.
-  // (tabBarStyle.height === 76 이 탭바 총 높이)
-  const tabBarGap = 76;
-  const btnSize = Math.floor((width - 32 - 40) / 5);
-
-  const handleSave = async () => {
-    if (!selectedPreset || !account) { Alert.alert('오류', '계정 정보가 없습니다.'); return; }
-    try {
-      setSaving(true);
-      const tags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
-      const payload = buildManualExpensePayload({
-        amount: selectedPreset.amount || 0,
-        category: selectedPreset.category as any,
-        item: selectedPreset.item || selectedPreset.label,
-        reason: [...reasons.filter(r => r !== '기타'), ...(reasons.includes('기타') && customReason.trim() ? ['기타: ' + customReason.trim()] : reasons.includes('기타') ? ['기타'] : [])].join(', '),
-        mood: (mood ?? 'normal') as any,
-        tags,
-        spentAt: new Date(),
-        sourceType: 'manual',
-      });
-      await createExpense({ ...payload, accountId: account?.id ?? "" } as any);
-      onSaved?.();
-      onClose();
-    } catch (e) {
-      Alert.alert('저장 실패', '다시 시도해주세요.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal visible={render} transparent animationType="none" onRequestClose={onClose}>
-      <View style={styles.sheetRoot}>
-        {/* 딤 배경 — 탭바 위에서 멈춰 하단 메뉴가 보이게, 부드럽게 페이드 */}
-        <AnimatedPressable
-          style={[styles.sheetBackdrop, { bottom: tabBarGap }, backdropAnim]}
-          onPress={() => onClose()}
-        />
-      <Animated.View style={[
-        styles.sheet,
-        sheetAnim,
-        { backgroundColor: colors.surface, paddingBottom: 16, marginBottom: tabBarGap + SHEET_TAIL_H },
-      ]}>
-        {/* 말풍선 꼬리 — 추가 버튼 정중앙으로 향함 */}
-        <View style={styles.sheetTailWrap} pointerEvents="none">
-          <View style={[styles.sheetTail, { borderTopColor: colors.surface }]} />
-        </View>
-        {/* 핸들 */}
-        <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
-
-        {selectedPreset ? (
-          // ── 2단계: 이유/기분/태그 입력 ──
-          <>
-            <View style={styles.quickHeader}>
-              <Pressable onPress={() => setSelectedPreset(null)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <MaterialIcons name="chevron-left" size={20} color={colors.textSec} />
-                <Text style={[styles.quickTitle, { color: colors.text }]}>{selectedPreset.label}</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }}>
-              {/* 이유 */}
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>왜 썼나요</Text>
-              <View style={styles.chipRow}>
-                {/* 1줄 */}
-                <View style={styles.chipLine}>
-                  {['배고파서', '스트레스·피로', '기분 전환·보상', '할인·혜택'].map((r) => {
-                    const active = reasons.includes(r);
-                    return (
-                      <Pressable
-                        key={r}
-                        style={[styles.chipCell, styles.chip, {
-                          backgroundColor: active ? colors.accentCta : colors.surfaceMuted,
-                          borderColor: active ? colors.accentCta : colors.border,
-                        }]}
-                        onPress={() => setReasons(prev =>
-                          prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]
-                        )}
-                      >
-                        <Text style={[styles.chipTextSm, { color: active ? '#fff' : colors.text }]} numberOfLines={1}>{r}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                {/* 2줄 */}
-                <View style={styles.chipLine}>
-                  {['시간 없음·귀찮음', '사람들과', '충동·습관', '기타'].map((r) => {
-                    const active = reasons.includes(r);
-                    return (
-                      <Pressable
-                        key={r}
-                        style={[styles.chipCell, styles.chip, {
-                          backgroundColor: active ? colors.accentCta : colors.surfaceMuted,
-                          borderColor: active ? colors.accentCta : colors.border,
-                        }]}
-                        onPress={() => setReasons(prev =>
-                          prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]
-                        )}
-                      >
-                        <Text style={[styles.chipTextSm, { color: active ? '#fff' : colors.text }]} numberOfLines={1}>{r}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-              {/* 기타 선택 시 추가 입력 */}
-              {reasons.includes('기타') && (
-                <TextInput
-                  style={[styles.tagInput, { borderColor: colors.borderInput, backgroundColor: colors.inputBg, color: colors.text, marginTop: 6 }]}
-                  placeholder="기타 이유를 입력하세요"
-                  placeholderTextColor={colors.placeholder}
-                  value={customReason}
-                  onChangeText={setCustomReason}
-                />
-              )}
-
-              {/* 기분 */}
-              <Text style={[styles.fieldLabel, { color: colors.textMuted, marginTop: 10 }]}>당시 기분</Text>
-              <View style={styles.chipLine}>
-                {MOODS.map((m) => {
-                  const active = mood === m.key;
-                  return (
-                    <Pressable
-                      key={m.key}
-                      style={[styles.chipCell, styles.chip, {
-                        backgroundColor: active ? colors.accentCta : colors.surfaceMuted,
-                        borderColor: active ? colors.accentCta : colors.border,
-                      }]}
-                      onPress={() => setMood(prev => prev === m.key ? null : m.key)}
-                    >
-                      <Text style={[styles.chipTextSm, { color: active ? '#fff' : colors.text }]} numberOfLines={1}>{m.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {/* 태그 */}
-              <Text style={[styles.fieldLabel, { color: colors.textMuted, marginTop: 12 }]}>태그</Text>
-              <View style={styles.chipLine}>
-                {TAG_PRESETS.map((t) => {
-                  const active = tagsText.split(',').map(x => x.trim()).includes(t);
-                  return (
-                    <Pressable
-                      key={t}
-                      style={[styles.chipCell, styles.chip, {
-                        backgroundColor: active ? colors.accentCta : colors.surfaceMuted,
-                        borderColor: active ? colors.accentCta : colors.border,
-                      }]}
-                      onPress={() => {
-                        const tags = tagsText.split(',').map(x => x.trim()).filter(Boolean);
-                        const next = active ? tags.filter(x => x !== t) : [...tags, t];
-                        setTagsText(next.join(', '));
-                      }}
-                    >
-                      <Text style={[styles.chipTextSm, { color: active ? '#fff' : colors.text }]} numberOfLines={1}>{t}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <TextInput
-                style={[styles.tagInput, { borderColor: colors.borderInput, backgroundColor: colors.inputBg, color: colors.text }]}
-                placeholder="쉼표로 구분"
-                placeholderTextColor={colors.placeholder}
-                value={tagsText}
-                onChangeText={setTagsText}
-              />
-            </ScrollView>
-
-            {/* 저장 버튼 */}
-            <Pressable
-              style={[styles.saveBtn, { backgroundColor: colors.accentCta, opacity: saving ? 0.6 : 1 }]}
-              onPress={handleSave}
-              disabled={saving}
-            >
-              {saving
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.saveBtnText}>저장</Text>
-              }
-            </Pressable>
-          </>
-        ) : (
-          // ── 1단계: 프리셋 선택 ──
-          <>
-            <View style={styles.quickHeader}>
-              <Text style={[styles.quickTitle, { color: colors.text }]}>빠른 입력</Text>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {quickPresets.length > 0 && (
-                  <>
-                    <Pressable
-                      style={[styles.quickAddBtn, {
-                        borderColor: quickEditMode === 'edit' ? colors.accentCta : colors.border,
-                        backgroundColor: quickEditMode === 'edit' ? colors.accentCta : colors.surfaceMuted,
-                      }]}
-                      onPress={() => setQuickEditMode(quickEditMode === 'edit' ? null : 'edit')}
-                    >
-                      <MaterialIcons name="edit" size={13} color={quickEditMode === 'edit' ? '#fff' : colors.textSec} />
-                      <Text style={[styles.quickAddBtnText, { color: quickEditMode === 'edit' ? '#fff' : colors.textSec }]}>수정</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.quickAddBtn, {
-                        borderColor: quickEditMode === 'delete' ? colors.logoutText : colors.border,
-                        backgroundColor: quickEditMode === 'delete' ? colors.logoutText : colors.surfaceMuted,
-                      }]}
-                      onPress={() => setQuickEditMode(quickEditMode === 'delete' ? null : 'delete')}
-                    >
-                      <MaterialIcons name="delete-outline" size={13} color={quickEditMode === 'delete' ? '#fff' : colors.textSec} />
-                      <Text style={[styles.quickAddBtnText, { color: quickEditMode === 'delete' ? '#fff' : colors.textSec }]}>삭제</Text>
-                    </Pressable>
-                  </>
-                )}
-                <Pressable
-                  style={[styles.quickAddBtn, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
-                  onPress={() => { setQuickEditMode(null); setEditingPreset(null); setPresetModalVisible(true); }}
-                >
-                  <MaterialIcons name="add" size={15} color={colors.textSec} />
-                  <Text style={[styles.quickAddBtnText, { color: colors.textSec }]}>추가</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {quickEditMode && (
-              <Text style={{ fontSize: 12, color: colors.textMuted, fontWeight: '600' }}>
-                {quickEditMode === 'edit' ? '수정할 항목을 선택하세요' : '삭제할 항목을 선택하세요'}
-              </Text>
-            )}
-
-            {quickPresets.length === 0 ? (
-              <Pressable
-                style={[styles.quickEmpty, { borderColor: colors.border }]}
-                onPress={() => { setEditingPreset(null); setPresetModalVisible(true); }}
-              >
-                <MaterialIcons name="add-circle-outline" size={20} color={colors.emptyIcon} />
-                <Text style={[styles.quickEmptyText, { color: colors.textMuted }]}>
-                  자주 쓰는 소비를 등록해보세요
-                </Text>
-              </Pressable>
-            ) : (
-              <View style={styles.quickPresetGrid}>
-                {quickPresets.map((preset: QuickPreset, index: number) => (
-                  <Animated.View
-                    key={preset.id}
-                    entering={
-                      animationsEnabled
-                        ? ZoomIn.delay(index * 45).springify().damping(12).mass(0.6)
-                        : undefined
-                    }
-                  >
-                  <Pressable
-                    style={({ pressed }: any) => [
-                      styles.quickPresetBtn,
-                      { width: btnSize, height: btnSize, borderRadius: btnSize / 2 },
-                      {
-                        backgroundColor: quickEditMode === 'delete'
-                          ? '#fee2e2'
-                          : quickEditMode === 'edit'
-                            ? '#e0f2fe'
-                            : (preset.color ?? colors.surfaceMuted),
-                        opacity: pressed ? 0.75 : 1,
-                        borderWidth: quickEditMode ? 1.5 : 0,
-                        borderColor: quickEditMode === 'delete'
-                          ? colors.logoutText
-                          : quickEditMode === 'edit'
-                            ? colors.accentCta
-                            : 'transparent',
-                      },
-                    ]}
-                    onPress={() => {
-                      if (quickEditMode === 'edit') {
-                        setEditingPreset(preset);
-                        setPresetModalVisible(true);
-                        setQuickEditMode(null);
-                      } else if (quickEditMode === 'delete') {
-                        Alert.alert(
-                          '삭제 확인',
-                          `'${preset.label}'을(를) 삭제하시겠습니까?`,
-                          [
-                            { text: '취소', style: 'cancel' },
-                            { text: '삭제', style: 'destructive', onPress: () => handleDeletePreset(preset.id) },
-                          ]
-                        );
-                      } else {
-                        // 2단계로 이동
-                        setSelectedPreset(preset);
-                      }
-                    }}
-                  >
-                    <Text style={[styles.quickPresetLabel, {
-                      color: (preset.color && preset.color !== '#94A3B8' && !quickEditMode) ? '#fff' : colors.text
-                    }]} numberOfLines={2}>
-                      {preset.label}
-                    </Text>
-                  </Pressable>
-                  </Animated.View>
-                ))}
-              </View>
-            )}
-          </>
-        )}
-      </Animated.View>
-      </View>
-
-      <QuickPresetModal
-        visible={presetModalVisible}
-        preset={editingPreset}
-        onClose={() => { setPresetModalVisible(false); setEditingPreset(null); }}
-        onSave={(preset: QuickPreset) => {
-          handleAddPreset(preset);
-          setPresetModalVisible(false);
-          setEditingPreset(null);
-        }}
-      />
-    </Modal>
-  );
-}
-
 // ── 메인 레이아웃 ─────────────────────────────────────────
 function TabsNavigator() {
   const router = useRouter();
   const { colors, isDark, animationsEnabled } = useTheme();
-  const { width } = useWindowDimensions();
   const headerTitleColor = isDark ? colors.headerTint : colors.text;
   const { count: pendingReviewCount } = usePendingReviewCount();
 
@@ -504,6 +175,8 @@ function TabsNavigator() {
   const { createExpense } = useExpenses();
   const [showQuickSheet, setShowQuickSheet] = useState(false);
   const [quickPresets, setQuickPresets] = useState<QuickPreset[]>([]);
+  const [presetLoadState, setPresetLoadState] = useState<QuickPresetLoadState>('loading');
+  const persistAllowedRef = useRef(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -514,27 +187,44 @@ function TabsNavigator() {
   const reviewTabBadge =
     pendingReviewCount > 0 ? (pendingReviewCount > 99 ? '99+' : pendingReviewCount) : undefined;
 
-  useEffect(() => {
-    AsyncStorage.getItem('@rw_quick_presets').then((val) => {
-      if (val) { try { setQuickPresets(JSON.parse(val)); } catch {} }
+  const hydrateQuickPresets = useCallback(() => {
+    persistAllowedRef.current = false;
+    setPresetLoadState('loading');
+    void readQuickPresets().then((result) => {
+      persistAllowedRef.current = result.status === 'ready';
+      setQuickPresets(result.presets);
+      setPresetLoadState(result.status);
     });
   }, []);
 
+  useEffect(() => {
+    hydrateQuickPresets();
+  }, [hydrateQuickPresets]);
+
   const handleAddPreset = useCallback((preset: QuickPreset) => {
-    setQuickPresets(prev => {
-      const exists = prev.findIndex(p => p.id === preset.id);
-      const next = exists >= 0
-        ? prev.map(p => p.id === preset.id ? preset : p)
-        : [...prev, preset];
-      AsyncStorage.setItem('@rw_quick_presets', JSON.stringify(next)).catch(() => {});
+    if (!persistAllowedRef.current) {
+      console.info('[quick-preset] storage write skipped', { reason: 'not-hydrated' });
+      return;
+    }
+    setQuickPresets((prev) => {
+      const exists = prev.findIndex((item) => item.id === preset.id);
+      const next =
+        exists >= 0
+          ? prev.map((item) => (item.id === preset.id ? preset : item))
+          : [...prev, preset];
+      persistQuickPresets(next, persistAllowedRef.current);
       return next;
     });
   }, []);
 
   const handleDeletePreset = useCallback((id: string) => {
-    setQuickPresets(prev => {
-      const next = prev.filter(p => p.id !== id);
-      AsyncStorage.setItem('@rw_quick_presets', JSON.stringify(next)).catch(() => {});
+    if (!persistAllowedRef.current) {
+      console.info('[quick-preset] storage write skipped', { reason: 'not-hydrated' });
+      return;
+    }
+    setQuickPresets((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      persistQuickPresets(next, persistAllowedRef.current);
       return next;
     });
   }, []);
@@ -545,7 +235,7 @@ function TabsNavigator() {
       <Tabs
         screenOptions={{
           headerShown: true,
-          tabBarActiveTintColor: colors.tabActive,
+          tabBarActiveTintColor: BRAND_GREEN,
           tabBarInactiveTintColor: colors.tabInactive,
           tabBarStyle: {
             height: 76, paddingBottom: 10, paddingTop: 8,
@@ -581,6 +271,7 @@ function TabsNavigator() {
         <Tabs.Screen
           name="reviews"
           options={{
+            headerShown: false,
             title: '리뷰',
             tabBarBadge: reviewTabBadge,
             tabBarIcon: ({ color, size }) => <MaterialIcons name="checklist" size={size} color={color} />,
@@ -594,7 +285,7 @@ function TabsNavigator() {
               <AddTabButton
                 onPress={() => router.push('/add-expense')}
                 onLongPress={() => { setShowQuickSheet(true); }}
-                fabColor={colors.accentCta}
+                fabColor={BRAND_GREEN}
                 labelColor={colors.addTabLabel}
                 animationsEnabled={animationsEnabled}
               />
@@ -609,10 +300,10 @@ function TabsNavigator() {
         visible={showQuickSheet}
         onClose={() => setShowQuickSheet(false)}
         quickPresets={quickPresets}
+        presetLoadState={presetLoadState}
+        onRetryLoad={hydrateQuickPresets}
         handleDeletePreset={handleDeletePreset}
         handleAddPreset={handleAddPreset}
-        colors={colors}
-        width={width}
         onSaved={() => {
           (globalThis as { __reloadHomeExpenses?: () => void }).__reloadHomeExpenses?.();
           (globalThis as { __reloadPendingReviewCount?: () => void }).__reloadPendingReviewCount?.();
@@ -648,83 +339,8 @@ const styles = StyleSheet.create({
     width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
     marginTop: -18,
-    shadowColor: '#34C36F', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22, shadowRadius: 10, elevation: 8,
+    shadowColor: '#28624D', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14, shadowRadius: 8, elevation: 4,
   },
   addTabLabel: { marginTop: 2, fontSize: 11, fontWeight: '700' },
-  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
-  sheetBackdrop: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  sheet: {
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    borderBottomLeftRadius: 22, borderBottomRightRadius: 22,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16, paddingTop: 12, gap: 6,
-    marginHorizontal: 0,
-    maxHeight: '72%',
-    transformOrigin: 'bottom',
-  },
-  sheetTailWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: -SHEET_TAIL_H + 1,
-    alignItems: 'center',
-  },
-  sheetTail: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 14,
-    borderRightWidth: 14,
-    borderTopWidth: SHEET_TAIL_H,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-  },
-  sheetHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 4 },
-  quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  quickTitle: { fontSize: 15, fontWeight: '800' },
-  quickAddBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: 10, borderWidth: StyleSheet.hairlineWidth,
-  },
-  quickAddBtnText: { fontSize: 12, fontWeight: '700' },
-  quickEmpty: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingVertical: 20, paddingHorizontal: 14,
-    borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', justifyContent: 'center',
-  },
-  quickEmptyText: { fontSize: 13, fontWeight: '600' },
-  quickPresetGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 2 },
-  quickPresetBtn: { alignItems: 'center', justifyContent: 'center' },
-  quickPresetLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center', paddingHorizontal: 4 },
-  // 2단계 스타일
-  fieldLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  chipRow: { flexDirection: 'column', gap: 8 },
-  chipLine: { flexDirection: 'row', gap: 8 },
-  chipCell: { flex: 1, minWidth: 0, borderRadius: 16 },
-  chip: {
-    paddingVertical: 7,
-    borderRadius: 16, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  chipSm: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 16,
-  },
-  chipText: { fontSize: 13, fontWeight: '600' },
-  chipTextSm: { fontSize: 11, fontWeight: '600' },
-  tagInput: {
-    marginTop: 8, height: 42, borderRadius: 10, borderWidth: 1.5,
-    paddingHorizontal: 12, fontSize: 14,
-  },
-  saveBtn: {
-    height: 52, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
-    marginTop: 4, marginHorizontal: 16,
-  },
-  saveBtnText: { fontSize: 16, fontWeight: '900', color: '#fff' },
 });

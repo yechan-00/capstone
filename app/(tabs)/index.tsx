@@ -9,29 +9,38 @@ import {
   Alert,
   useWindowDimensions,
   Platform,
-  Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FlipInEasyX, FlipOutEasyX } from 'react-native-reanimated';
 import { useAuth } from '@/hooks/useAuth';
 import { useRegretPatternAlertSync } from '@/hooks/useRegretPatternAlertSync';
 import { useRefreshPendingReviewCountOnFocus } from '@/hooks/usePendingReviewCount';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
-import { HomeSummaryHero } from '@/components/HomeSummaryHero';
+import { HomeRegretAnalysisCard } from '@/components/home/HomeRegretAnalysisCard';
+import { HomeRegretPatternCard } from '@/components/home/HomeRegretPatternCard';
+import { HomeRegretPatternAlertSheet } from '@/components/home/HomeRegretPatternAlertSheet';
+import { HomeCompactSpendingSummary } from '@/components/home/HomeCompactSpendingSummary';
+import { PhotoCalendarDayCell } from '@/components/home/PhotoCalendarDayCell';
+import { HomeDayExpenseModal } from '@/components/home/HomeDayExpenseModal';
+import { ShareNotificationsModal } from '@/components/ShareNotificationsModal';
 import { expenseService } from '@/services/expenseService';
 import { reviewService } from '@/services/reviewService';
-import { ensureNotificationPermission } from '@/services/notificationService';
+import {
+  ensureNotificationPermission,
+  getNotificationPermissionKind,
+  type NotificationPermissionKind,
+} from '@/services/notificationService';
 import { scheduleService } from '@/services/scheduleService';
+import { userNotificationService } from '@/services/userNotificationService';
 import { toUserMessage } from '@/utils/error';
-import { normalizeReviewSatisfaction } from '@/utils/reviewNormalize';
-import { useTheme } from '@/theme/ThemeContext';
-import { BRAND_GREEN_LIGHT } from '@/theme/ThemeContext';
+import { BRAND_GREEN, useTheme } from '@/theme/ThemeContext';
 
 
-import type { Expense, ExpenseCategory, Review, ReviewSchedule } from '@/lib/types';
-import { categoryDotColor } from '@/lib/categoryColors';
+import type { Expense, Review, ReviewSchedule } from '@/lib/types';
+import { categoryDisplay } from '@/lib/expenseOptions';
 import {
   budgetPeriodForMonth,
   currentBudgetPeriod,
@@ -40,16 +49,21 @@ import {
   resolveBudgetPeriodMode,
   toFoodBudgetKrw,
 } from '@/lib/budgetPeriod';
-import {
-  buildRegretPatternHomeHeadline,
-  formatRegretPatternAlertSummary,
-} from '@/lib/regretPatternAlert';
+import { buildHomeRegretPatternView, type HomeRegretPatternView } from '@/lib/regretPatternAlert';
 import { loadAllTimePatternInsights } from '@/services/regretPatternAlertService';
+import {
+  buildCalendarCells,
+  buildHomeRegretSummary,
+  formatMonth,
+  sortExpensesForCalendarCells,
+  summarizeMonthByCategory,
+  toDayKey,
+} from '@/lib/homeCalendar';
 
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colors, isDark, animationsEnabled } = useTheme();
+  const { colors, isDark } = useTheme();
   const { width, height } = useWindowDimensions();
   const isCompact = height < 760 || width < 420;
   const isWeb = Platform.OS === 'web';
@@ -65,22 +79,40 @@ export default function HomeScreen() {
   const calendarCells = React.useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const calendarRows = React.useMemo(() => Math.ceil(calendarCells.length / 7), [calendarCells]);
   const calendarCellHeight = React.useMemo(() => {
-    if (!isWeb) return isCompact ? 56 : 72;
+    // dateRow 21 + gap 3 + card + cell padding (compact 4 / regular 6)
+    if (!isWeb) return isCompact ? 74 : 82;
     const reservedHeight = isCompact ? 340 : 380;
     const available = Math.floor((height - reservedHeight) / Math.max(1, calendarRows));
-    return Math.max(isCompact ? 48 : 58, Math.min(isCompact ? 66 : 92, available));
+    return Math.max(isCompact ? 72 : 78, Math.min(isCompact ? 76 : 84, available));
   }, [calendarRows, height, isCompact, isWeb]);
   /** 날짜 탭 시 상세 모달에 표시할 날짜 (YYYY-MM-DD) */
   const [detailDayKey, setDetailDayKey] = React.useState<string | null>(null);
-  const [regretPatternHeadline, setRegretPatternHeadline] = React.useState<string | null>(null);
-  /** 이번 달 소비 정산 카드만 접기 (캘린더는 항상 표시) */
-  const [monthBreakdownCollapsed, setMonthBreakdownCollapsed] = React.useState(false);
+  const [regretPatternStatus, setRegretPatternStatus] = React.useState<'loading' | 'error' | 'ready'>(
+    'loading',
+  );
+  const [regretPatternView, setRegretPatternView] = React.useState<HomeRegretPatternView | null>(null);
+  const [patternAlertSheetOpen, setPatternAlertSheetOpen] = React.useState(false);
+  const [notificationPermission, setNotificationPermission] = React.useState<
+    NotificationPermissionKind | 'loading'
+  >(Platform.OS === 'web' ? 'unknown' : 'loading');
   /** 지출 ID → 해당 지출의 가장 최근 리뷰 (캘린더 감성 색) */
   const [reviewsByExpenseId, setReviewsByExpenseId] = React.useState<Map<string, Review>>(() => new Map());
-  /** 지출 ID → 해당 지출의 가장 이른 pending 리뷰 스케줄 (평가하기 이동용) */
-  const [pendingScheduleByExpenseId, setPendingScheduleByExpenseId] = React.useState<
-    Map<string, ReviewSchedule>
+  /** 지출 ID → pending·expired 리뷰 스케줄 (홈/상세와 동일한 상태 계산용) */
+  const [reviewSchedulesByExpenseId, setReviewSchedulesByExpenseId] = React.useState<
+    Map<string, ReviewSchedule[]>
   >(() => new Map());
+  const [unreadCommentsByExpenseId, setUnreadCommentsByExpenseId] = React.useState<Map<string, number>>(
+    () => new Map(),
+  );
+  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
+  const [headerScrolled, setHeaderScrolled] = React.useState(false);
+  const headerScrolledRef = React.useRef(false);
+  const handleHomeScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const next = event.nativeEvent.contentOffset.y > 2;
+    if (next === headerScrolledRef.current) return;
+    headerScrolledRef.current = next;
+    setHeaderScrolled(next);
+  }, []);
   const lastFocusRefreshAtRef = React.useRef(0);
   /** 월 이동·중복 요청 시 이전 응답이 state를 덮어쓰지 않도록 */
   const loadSeqRef = React.useRef(0);
@@ -110,6 +142,26 @@ export default function HomeScreen() {
     return expenses.filter((e) => e.spentAt.getFullYear() === y && e.spentAt.getMonth() === m);
   }, [expenses, currentMonth]);
 
+  const previousMonthExpenses = React.useMemo(() => {
+    const previous = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+    return expenses.filter(
+      (expense) =>
+        expense.spentAt.getFullYear() === previous.getFullYear() &&
+        expense.spentAt.getMonth() === previous.getMonth(),
+    );
+  }, [expenses, currentMonth]);
+
+  const homeRegretSummary = React.useMemo(
+    () =>
+      buildHomeRegretSummary(
+        calendarExpenses,
+        previousMonthExpenses,
+        reviewsByExpenseId,
+        currentMonth,
+      ),
+    [calendarExpenses, previousMonthExpenses, reviewsByExpenseId, currentMonth],
+  );
+
   const periodExpenses = React.useMemo(
     () => expenses.filter((e) => e.spentAt >= budgetPeriod.start && e.spentAt <= budgetPeriod.end),
     [expenses, budgetPeriod],
@@ -130,10 +182,10 @@ export default function HomeScreen() {
   const sortedExpensesByDayKey = React.useMemo(() => {
     const out = new Map<string, Expense[]>();
     expenseMapByDay.forEach((raw, k) => {
-      out.set(k, sortExpensesForCalendarCells(raw, reviewsByExpenseId));
+      out.set(k, sortExpensesForCalendarCells(raw));
     });
     return out;
-  }, [expenseMapByDay, reviewsByExpenseId]);
+  }, [expenseMapByDay]);
 
   const detailDayExpenses = React.useMemo(() => {
     if (!detailDayKey) return [];
@@ -143,17 +195,35 @@ export default function HomeScreen() {
   const monthCategoryTotals = React.useMemo(() => summarizeMonthByCategory(periodExpenses), [periodExpenses]);
   const monthTotalAmount = monthCategoryTotals.total;
   const foodBudgetKrw = account ? toFoodBudgetKrw(account) : 0;
-  const foodBudgetRemaining = foodBudgetKrw > 0 ? foodBudgetKrw - monthTotalAmount : null;
-  const regretPatternAlertSummary = formatRegretPatternAlertSummary(account?.regretPatternAlertSlots ?? []);
-
   useRegretPatternAlertSync(account, `${expenses.length}:${reviewsByExpenseId.size}`);
   useRefreshPendingReviewCountOnFocus();
-  const periodDayKeys = React.useMemo(() => {
-    const keys = new Set<string>();
-    for (const e of periodExpenses) keys.add(toDayKey(e.spentAt));
-    return keys.size;
-  }, [periodExpenses]);
-  const activeDaysCount = periodDayKeys;
+  const loadCommentNotifications = React.useCallback(async () => {
+    if (!user?.uid) {
+      setUnreadCommentsByExpenseId(new Map());
+      return;
+    }
+    try {
+      const notifications = await userNotificationService.listForUser(user.uid);
+      const next = new Map<string, number>();
+      notifications.forEach((notification) => {
+        if (!notification.read && notification.expenseId) {
+          next.set(notification.expenseId, (next.get(notification.expenseId) ?? 0) + 1);
+        }
+      });
+      setUnreadCommentsByExpenseId(next);
+    } catch {
+      setUnreadCommentsByExpenseId(new Map());
+    }
+  }, [user?.uid]);
+
+  const handleShareUnreadChange = React.useCallback(() => {
+    void loadCommentNotifications();
+  }, [loadCommentNotifications]);
+
+  const handleShareNotificationsClose = React.useCallback(() => {
+    setNotificationsOpen(false);
+    void loadCommentNotifications();
+  }, [loadCommentNotifications]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -169,7 +239,8 @@ export default function HomeScreen() {
     if (!account) {
       setExpenses([]);
       setReviewsByExpenseId(new Map());
-      setPendingScheduleByExpenseId(new Map());
+      setReviewSchedulesByExpenseId(new Map());
+      setUnreadCommentsByExpenseId(new Map());
       setLoading(false);
       setError(null);
       return;
@@ -185,14 +256,22 @@ export default function HomeScreen() {
     let cancelled = false;
     void (async () => {
       try {
-        const fresh = await reviewService.getLatestByExpenseIds(
-          account.id,
-          list.map((e) => e.id),
-        );
+        const ids = list.map((e) => e.id);
+        const [fresh, schedMap] = await Promise.all([
+          reviewService.getLatestByExpenseIds(account.id, ids),
+          scheduleService.getActiveSchedulesByExpenseIds(account.id, ids),
+        ]);
         if (cancelled) return;
         setReviewsByExpenseId((prev) => {
           const next = new Map(prev);
           fresh.forEach((rev, expenseId) => next.set(expenseId, rev));
+          return next;
+        });
+        setReviewSchedulesByExpenseId((prev) => {
+          const next = new Map(prev);
+          ids.forEach((expenseId) => {
+            next.set(expenseId, schedMap.get(expenseId) ?? []);
+          });
           return next;
         });
       } catch {
@@ -217,6 +296,20 @@ export default function HomeScreen() {
     return () => { delete (globalThis as any).__reloadHomeExpenses; };
   }, []);
 
+  const refreshNotificationPermission = React.useCallback(() => {
+    if (Platform.OS === 'web') {
+      setNotificationPermission('unknown');
+      return;
+    }
+    void getNotificationPermissionKind().then(setNotificationPermission);
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshNotificationPermission();
+    }, [refreshNotificationPermission]),
+  );
+
   useFocusEffect(
     React.useCallback(() => {
       if (!account) return;
@@ -227,10 +320,14 @@ export default function HomeScreen() {
       void loadMonthExpensesRef.current?.(true);
       void loadAllTimePatternInsights(account.id)
         .then(({ weekdayInsights, timeOfDayInsights }) => {
-          setRegretPatternHeadline(buildRegretPatternHomeHeadline(weekdayInsights, timeOfDayInsights));
+          setRegretPatternView(buildHomeRegretPatternView(weekdayInsights, timeOfDayInsights));
+          setRegretPatternStatus('ready');
         })
-        .catch(() => setRegretPatternHeadline(null));
-    }, [account])
+        .catch(() => {
+          setRegretPatternStatus((prev) => (prev === 'ready' ? 'ready' : 'error'));
+        });
+      void loadCommentNotifications();
+    }, [account, loadCommentNotifications])
   );
 
 const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | null>(null);
@@ -256,8 +353,11 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
       const m = monthSnapshot.getMonth();
       const calStart = new Date(y, m, 1, 0, 0, 0, 0);
       const calEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
+      const previousMonthStart = new Date(y, m - 1, 1, 0, 0, 0, 0);
       const period = budgetPeriodForMonth(y, m, account);
-      const start = new Date(Math.min(calStart.getTime(), period.start.getTime()));
+      const start = new Date(
+        Math.min(previousMonthStart.getTime(), calStart.getTime(), period.start.getTime()),
+      );
       const end = new Date(Math.max(calEnd.getTime(), period.end.getTime()));
       const data = await expenseService.getByAccountIdInRange(account.id, start, end);
       if (isStaleMonthLoad(seq, monthSnapshot)) return undefined;
@@ -275,15 +375,14 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
       }
 
       try {
-        const pendMap = await scheduleService.getEarliestPendingScheduleByExpenseIds(
+        const schedMap = await scheduleService.getActiveSchedulesByExpenseIds(
           account.id,
           data.map((e) => e.id),
-          { includePastGraceWindow: true },
         );
         if (isStaleMonthLoad(seq, monthSnapshot)) return data;
-        setPendingScheduleByExpenseId(pendMap);
+        setReviewSchedulesByExpenseId(schedMap);
       } catch (scheduleErr) {
-        console.warn('[home] pending schedules load failed', scheduleErr);
+        console.warn('[home] review schedules load failed', scheduleErr);
       }
 
       return data;
@@ -292,7 +391,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
       const e = err instanceof Error ? err : new Error('소비 목록을 불러오는데 실패했습니다.');
       setError(e);
       setReviewsByExpenseId(new Map());
-      setPendingScheduleByExpenseId(new Map());
+      setReviewSchedulesByExpenseId(new Map());
       return undefined;
     } finally {
       // silent 여부와 관계없이 «가장 최신» 요청이 끝나면 로딩 해제
@@ -348,7 +447,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
   if (authLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={BRAND_GREEN} />
       </View>
     );
   }
@@ -362,7 +461,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
   const cardElev =
     !isDark && Platform.OS !== 'web'
       ? {
-          shadowColor: '#34C36F',
+          shadowColor: '#20352B',
           shadowOffset: { width: 0, height: 5 },
           shadowOpacity: 0.06,
           shadowRadius: 14,
@@ -370,14 +469,36 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         }
       : {};
 
-  const heroTitle = resolveBudgetPeriodMode(account) === 'payday' ? '식비 주기' : '이번 달 소비';
-  const heroSubtitle =
-    resolveBudgetPeriodMode(account) === 'payday'
-      ? formatBudgetPeriodRange(budgetPeriod.start, budgetPeriod.end)
-      : formatMonth(currentMonth);
-
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
+      <View
+        style={[
+          styles.homeHeader,
+          isCompact && styles.homeHeaderCompact,
+          {
+            paddingTop: Math.max(insets.top, 12) + 8,
+            backgroundColor: colors.bg,
+            borderBottomColor: headerScrolled ? colors.headerDivider : 'transparent',
+          },
+        ]}
+      >
+        <View style={styles.homeTopBar}>
+          <View>
+            <Text style={[styles.homeEyebrow, { color: colors.text }]}>REGRET WALLET</Text>
+            <Text style={[styles.homeGreeting, { color: colors.text }]}>나의 후회 기록</Text>
+          </View>
+          <Pressable
+            onPress={() => setNotificationsOpen(true)}
+            hitSlop={10}
+            style={[styles.notificationButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            accessibilityRole="button"
+            accessibilityLabel="댓글 알림 열기"
+          >
+            <MaterialIcons name="notifications-none" size={24} color={colors.textSec} />
+            {unreadCommentsByExpenseId.size > 0 ? <View style={styles.notificationDot} /> : null}
+          </Pressable>
+        </View>
+      </View>
       {isOffline && (
         <View style={[styles.offlineBanner, { backgroundColor: colors.offlineBg, borderBottomColor: colors.offlineBorder }]}>
           <Text style={[styles.offlineText, { color: colors.offlineText }]}>네트워크 연결이 필요합니다</Text>
@@ -387,163 +508,19 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         contentContainerStyle={[
           styles.list,
           isCompact && styles.listCompact,
-          { paddingTop: Math.max(insets.top, 12) + 8 },
+          styles.listBelowHeader,
+          isCompact && styles.listBelowHeaderCompact,
         ]}
+        onScroll={handleHomeScroll}
+        scrollEventThrottle={32}
       >
-        <View style={styles.homeTopBar}>
-          <Text style={[styles.homeGreeting, { color: colors.text }]}>오늘도 좋은 선택을 응원해요!</Text>
-          <Pressable
-            onPress={() => router.push('/(tabs)/settings')}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="설정"
-          >
-            <MaterialIcons name="notifications-none" size={24} color={colors.textSec} />
-          </Pressable>
-        </View>
-
-        <HomeSummaryHero
-          title={heroTitle}
-          subtitle={heroSubtitle}
-          totalAmount={monthTotalAmount}
-          budgetKrw={foodBudgetKrw}
+        <HomeRegretAnalysisCard
+          rate={homeRegretSummary.rate}
+          deltaPp={homeRegretSummary.deltaPp}
+          dailyPoints={homeRegretSummary.dailyPoints}
+          regretCount={homeRegretSummary.regretCount}
+          reviewCount={homeRegretSummary.reviewCount}
         />
-        {regretPatternHeadline ? (
-          <View
-            style={[
-              styles.patternCardOuter,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-              cardElev,
-            ]}
-          >
-            <View style={[styles.patternIconWrap, { backgroundColor: isDark ? colors.surfaceMuted : BRAND_GREEN_LIGHT }]}>
-              <MaterialIcons name="schedule" size={20} color={colors.primary} />
-            </View>
-            <View style={styles.patternTextWrap}>
-              <Text style={[styles.patternTitle, { color: colors.text }]}>후회 많은 시간</Text>
-              <Text style={[styles.patternHeadline, { color: colors.textSec }]}>{regretPatternHeadline}</Text>
-              {account.regretPatternAlertEnabled !== false && account.regretPatternAlertSlots?.length ? (
-                <Text style={[styles.patternMeta, { color: colors.textMuted }]}>{regretPatternAlertSummary}</Text>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
-
-        <View style={styles.spendingHeader}>
-          <Text style={[styles.spendingHeaderTitle, { color: colors.textSec }]}>소비 요약</Text>
-        </View>
-        <View
-          style={[
-            styles.breakdownCard,
-            isCompact && styles.breakdownCardCompact,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            cardElev,
-          ]}
-        >
-          <View style={styles.breakdownHeader}>
-            <View style={styles.breakdownHeaderLeft}>
-              <Text style={[styles.breakdownTitle, { color: colors.text }]}>
-                {resolveBudgetPeriodMode(account) === 'payday' ? '식비 주기' : '이번 달 소비'}
-              </Text>
-              <Text style={[styles.breakdownSubtitle, { color: colors.textMuted }]}>
-                {resolveBudgetPeriodMode(account) === 'payday'
-                  ? formatBudgetPeriodRange(budgetPeriod.start, budgetPeriod.end)
-                  : formatMonth(currentMonth)}
-              </Text>
-            </View>
-            <View style={styles.breakdownHeaderRight}>
-              <View style={[styles.daysPill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
-                <MaterialIcons name="calendar-today" size={14} color={colors.textSec} />
-                <Text style={[styles.daysPillText, { color: colors.textSec }]}>기록 {activeDaysCount}일</Text>
-              </View>
-              <Pressable
-                onPress={() => setMonthBreakdownCollapsed((v) => !v)}
-                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                accessibilityRole="button"
-                accessibilityLabel={monthBreakdownCollapsed ? '이번 달 소비 펼치기' : '이번 달 소비 접기'}
-              >
-                <Text style={[styles.breakdownToggleText, { color: colors.primary }]}>
-                  {monthBreakdownCollapsed ? '펼치기' : '접기'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {monthBreakdownCollapsed ? (
-            <Animated.View
-              key="breakdown-collapsed"
-              style={styles.breakdownCollapsedBlock}
-              entering={animationsEnabled ? FlipInEasyX.duration(320) : undefined}
-              exiting={animationsEnabled ? FlipOutEasyX.duration(200) : undefined}
-            >
-              <View style={styles.breakdownCollapsedTotalRow}>
-                <Text style={[styles.breakdownCollapsedTotalLabel, { color: colors.text }]}>합계</Text>
-                <Text style={[styles.breakdownCollapsedTotalAmount, { color: colors.primary }]}>
-                  {monthTotalAmount.toLocaleString()}원
-                </Text>
-              </View>
-              <View style={styles.breakdownCollapsedCatsRow}>
-                {(
-                  [
-                    { key: 'takeout' as const, label: '포장', amount: monthCategoryTotals.takeout, cat: 'takeout' as ExpenseCategory },
-                    { key: 'delivery' as const, label: '배달', amount: monthCategoryTotals.delivery, cat: 'delivery' as ExpenseCategory },
-                    { key: 'cafe' as const, label: '카페', amount: monthCategoryTotals.cafe, cat: 'cafe' as ExpenseCategory },
-                  ] as const
-                ).map((row) => (
-                  <View key={row.key} style={styles.breakdownCollapsedCatCell}>
-                    <View style={[styles.breakdownDot, { backgroundColor: categoryDotColor(row.cat) }]} />
-                    <Text style={[styles.breakdownCollapsedCatText, { color: colors.textSec }]} numberOfLines={1}>
-                      {row.label} {row.amount.toLocaleString()}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </Animated.View>
-          ) : (
-            <Animated.View
-              key="breakdown-expanded"
-              entering={animationsEnabled ? FlipInEasyX.duration(320) : undefined}
-              exiting={animationsEnabled ? FlipOutEasyX.duration(200) : undefined}
-            >
-              <View style={[styles.breakdownDivider, { backgroundColor: colors.border }]} />
-
-              {(
-                [
-                  { key: 'takeout' as const, label: '외식(포장)', amount: monthCategoryTotals.takeout, cat: 'takeout' as ExpenseCategory },
-                  { key: 'delivery' as const, label: '배달', amount: monthCategoryTotals.delivery, cat: 'delivery' as ExpenseCategory },
-                  { key: 'cafe' as const, label: '카페', amount: monthCategoryTotals.cafe, cat: 'cafe' as ExpenseCategory },
-                ] as const
-              ).map((row) => (
-                <View key={row.key} style={styles.breakdownRow}>
-                  <View style={styles.breakdownRowLeft}>
-                    <View style={[styles.breakdownDot, { backgroundColor: categoryDotColor(row.cat) }]} />
-                    <Text style={[styles.breakdownRowLabel, { color: colors.textSec }]}>{row.label}</Text>
-                  </View>
-                  <Text style={[styles.breakdownRowAmount, { color: colors.text }]}>{row.amount.toLocaleString()}원</Text>
-                </View>
-              ))}
-
-              <View style={[styles.breakdownDividerBold, { backgroundColor: colors.border }]} />
-
-              <View style={styles.breakdownTotalRow}>
-                <Text style={[styles.breakdownTotalLabel, { color: colors.text }]}>합계</Text>
-                <Text style={[styles.breakdownTotalAmount, { color: colors.primary }]}>{monthTotalAmount.toLocaleString()}원</Text>
-              </View>
-              {foodBudgetRemaining != null ? (
-                <Text
-                  style={[
-                    styles.breakdownBudgetHint,
-                    { color: foodBudgetRemaining >= 0 ? colors.success : colors.logoutText },
-                  ]}
-                >
-                  {foodBudgetRemaining >= 0
-                    ? `식비 예산 잔여 ${foodBudgetRemaining.toLocaleString()}원 / ${foodBudgetKrw.toLocaleString()}원`
-                    : `식비 예산 초과 ${Math.abs(foodBudgetRemaining).toLocaleString()}원`}
-                </Text>
-              ) : null}
-            </Animated.View>
-          )}
-        </View>
 
         <View
           style={[
@@ -567,7 +544,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               }}
               hitSlop={8}
             >
-              <MaterialIcons name="chevron-left" size={28} color={colors.primary} />
+              <MaterialIcons name="chevron-left" size={28} color={colors.text} />
             </Pressable>
             <Text style={[styles.monthTitle, { color: colors.text }]}>{formatMonth(currentMonth)}</Text>
             <View style={styles.monthHeaderRight}>
@@ -588,7 +565,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                 }}
                 hitSlop={8}
               >
-                <MaterialIcons name="chevron-right" size={28} color={colors.primary} />
+                <MaterialIcons name="chevron-right" size={28} color={colors.text} />
               </Pressable>
             </View>
           </View>
@@ -600,7 +577,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
                   styles.weekText,
                   {
                     color:
-                      i === 0 ? '#e11d48' : i === 6 ? '#2563eb' : colors.textSec,
+                      i === 0 ? '#C47A7A' : i === 6 ? '#7A8A94' : colors.textSec,
                   },
                 ]}
               >
@@ -615,86 +592,71 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
               }
               const key = toDayKey(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), cell));
               const dayExpenses = sortedExpensesByDayKey.get(key) ?? [];
-              const count = dayExpenses.length;
               const active = detailDayKey === key;
               const today = key === todayKey;
-              const previewCount = isCompact ? 1 : 2;
               const dow = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), cell).getDay();
               const isSun = dow === 0;
               const isSat = dow === 6;
-              const isPayday =
-                cell != null &&
-                isPaydayCell(currentMonth.getFullYear(), currentMonth.getMonth(), cell, account);
               return (
-                <Pressable
+                <PhotoCalendarDayCell
                   key={key}
-                  style={[styles.dayCell, { minHeight: calendarCellHeight }, isCompact && styles.dayCellCompact]}
+                  day={cell}
+                  expenses={dayExpenses}
+                  reviewsByExpenseId={reviewsByExpenseId}
+                  unreadCommentsByExpenseId={unreadCommentsByExpenseId}
+                  selected={active}
+                  today={today}
+                  payday={isPaydayCell(currentMonth.getFullYear(), currentMonth.getMonth(), cell, account)}
+                  sunday={isSun}
+                  saturday={isSat}
+                  compact={isCompact}
+                  minHeight={calendarCellHeight}
                   onPress={() => setDetailDayKey(key)}
-                >
-                  <View
-                    style={[
-                      styles.dayNumCircle,
-                      active && { backgroundColor: colors.primary },
-                      today && !active && { borderWidth: 2, borderColor: colors.primary },
-                      isPayday && !active && { borderWidth: 2, borderColor: '#e11d48' },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.dayNum,
-                        isCompact && styles.dayNumCompact,
-                        active && { color: colors.onPrimary },
-                        !active && isSun && { color: '#e11d48' },
-                        !active && isSat && { color: '#2563eb' },
-                        !active && !isSun && !isSat && { color: colors.text },
-                      ]}
-                    >
-                      {cell}
-                    </Text>
-                  </View>
-                  <View style={styles.dayEvents}>
-                    {dayExpenses.slice(0, previewCount).map((expense) => {
-                      const review = reviewsByExpenseId.get(expense.id);
-                      const surf = review ? reviewSentimentSurface(review, isDark) : null;
-                      const chipText = formatCalendarAmountChip(Number(expense.amount) || 0);
-                      return (
-                        <View
-                          key={expense.id}
-                          style={[
-                            styles.eventPill,
-                            {
-                              backgroundColor: surf?.bg ?? colors.surfaceMuted,
-                              borderWidth: StyleSheet.hairlineWidth,
-                              borderColor: surf?.border ?? colors.border,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.eventPillText,
-                              { color: surf ? surf.text : colors.textSec },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {chipText}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                    {count > previewCount ? (
-                      <Text style={[styles.morePillText, { color: colors.textMuted }]}>+{count - previewCount}</Text>
-                    ) : null}
-                  </View>
-                </Pressable>
+                />
               );
             })}
           </View>
         </View>
 
+        <HomeRegretPatternCard
+          status={regretPatternStatus}
+          view={regretPatternView}
+          account={account}
+          permission={notificationPermission}
+          elevation={cardElev}
+          onPress={() => {
+            if (!patternAlertSheetOpen) setPatternAlertSheetOpen(true);
+          }}
+        />
+
+        <HomeRegretPatternAlertSheet
+          visible={patternAlertSheetOpen}
+          onClose={() => setPatternAlertSheetOpen(false)}
+          account={account}
+          view={regretPatternView}
+          patternStatus={regretPatternStatus}
+          permission={notificationPermission}
+          onPermissionRefresh={refreshNotificationPermission}
+        />
+
+        <HomeCompactSpendingSummary
+          periodLabel={formatBudgetPeriodRange(budgetPeriod.start, budgetPeriod.end)}
+          totalAmount={monthTotalAmount}
+          budgetKrw={foodBudgetKrw}
+          expenseCount={periodExpenses.length}
+          categories={(['takeout', 'delivery', 'cafe'] as const).map((key) => {
+            const display = categoryDisplay(key);
+            return {
+              label: display?.label ?? key,
+              amount: monthCategoryTotals[key],
+              emoji: display?.emoji ?? '',
+            };
+          })}
+        />
 
         {loading ? (
           <View style={styles.monthStateWrap}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <ActivityIndicator size="large" color={BRAND_GREEN} />
           </View>
         ) : error ? (
           <View style={styles.monthStateWrap}>
@@ -710,343 +672,31 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
       </ScrollView>
 
       {detailDayKey !== null ? (
-      <Modal
-        visible
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDetailDayKey(null)}
-      >
-        <View style={[styles.modalRoot, { backgroundColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(15,23,42,0.42)' }]}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setDetailDayKey(null)} accessibilityRole="button" accessibilityLabel="닫기" />
-          <View
-            style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            pointerEvents="box-none"
-          >
-            <View style={styles.modalCardInner}>
-              <View style={styles.modalHeaderRow}>
-                <Text style={[styles.modalHeaderTitle, { color: colors.text }]} numberOfLines={1}>
-                  {detailDayKey ? formatDetailDayHeading(detailDayKey) : ''}
-                </Text>
-                <Pressable
-                  onPress={() => setDetailDayKey(null)}
-                  hitSlop={12}
-                  style={[styles.modalCloseBtn, { backgroundColor: colors.surfaceMuted }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="닫기"
-                >
-                  <MaterialIcons name="close" size={22} color={colors.textSec} />
-                </Pressable>
-              </View>
-              <Text style={[styles.modalSub, { color: colors.textMuted }]}>
-                {detailDayExpenses.length > 0 ? `${detailDayExpenses.length}건` : '기록 없음'}
-              </Text>
-
-              {detailDayExpenses.length === 0 ? (
-                <View style={styles.modalEmpty}>
-                  <MaterialIcons name="event-available" size={40} color={colors.emptyIcon} />
-                  <Text style={[styles.modalEmptyText, { color: colors.textSec }]}>
-                    이 날짜에 등록된 소비가 없어요.
-                  </Text>
-                </View>
-              ) : (
-                <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-                  {detailDayExpenses.map((item, index) => {
-                    const itemReview = reviewsByExpenseId.get(item.id);
-                    const pendingSched = pendingScheduleByExpenseId.get(item.id);
-                    const canReview = !itemReview && pendingSched != null;
-                    const surf = itemReview ? reviewSentimentSurface(itemReview, isDark) : null;
-                    return (
-                    <View key={item.id}>
-                      {index > 0 ? <View style={[styles.modalBlockDivider, { backgroundColor: colors.border }]} /> : null}
-                      <View
-                        style={[
-                          styles.modalExpenseBlock,
-                          surf
-                            ? {
-                                backgroundColor: surf.bg,
-                                borderWidth: StyleSheet.hairlineWidth,
-                                borderColor: surf.border,
-                              }
-                            : { backgroundColor: colors.surfaceMuted },
-                        ]}
-                      >
-                      <View style={styles.modalEventTitleRow}>
-                        <Pressable
-                          onPress={() => handleExpensePress(item.id)}
-                          style={({ pressed }) => [
-                            styles.modalEventTitlePress,
-                            { opacity: pressed ? 0.88 : 1 },
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.modalDot,
-                              { backgroundColor: categoryDotColor(item.category) },
-                            ]}
-                          />
-                          <Text style={[styles.modalEventTitle, { color: colors.text }]} numberOfLines={2}>
-                            {(item.item ?? item.content ?? item.reason ?? '소비').trim()}
-                          </Text>
-                        </Pressable>
-                        {canReview && pendingSched ? (
-                          <Pressable
-                            onPress={() => openReviewForExpense(item.id, pendingSched.id)}
-                            style={[
-                              styles.modalReviewBtn,
-                              { borderColor: colors.primary, backgroundColor: colors.choiceActiveBg },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="평가하기"
-                          >
-                            <Text style={[styles.modalReviewBtnText, { color: colors.primary }]}>평가하기</Text>
-                          </Pressable>
-                        ) : null}
-                      </View>
-
-                      <View style={[styles.modalField, { borderBottomColor: colors.border }]}>
-                        <Text style={[styles.modalFieldLabel, { color: colors.textMuted }]}>날짜 및 시간</Text>
-                        <Text style={[styles.modalFieldValue, { color: colors.textSec }]}>{formatKoreanSpentAt(item.spentAt)}</Text>
-                      </View>
-                      <View style={[styles.modalField, { borderBottomColor: colors.border }]}>
-                        <Text style={[styles.modalFieldLabel, { color: colors.textMuted }]}>금액</Text>
-                        <Text style={[styles.modalFieldValue, { color: colors.text }]}>
-                          {Number(item.amount).toLocaleString()}원
-                        </Text>
-                      </View>
-                      <View style={[styles.modalField, { borderBottomColor: colors.border }]}>
-                        <Text style={[styles.modalFieldLabel, { color: colors.textMuted }]}>카테고리</Text>
-                        <Text style={[styles.modalFieldValue, { color: colors.textSec }]}>
-                          {expenseCategoryLine(item.category)}
-                        </Text>
-                      </View>
-                      {(item.reason?.trim() || item.summaryLine?.trim()) ? (
-                        <View style={[styles.modalField, { borderBottomColor: colors.border }]}>
-                          <Text style={[styles.modalFieldLabel, { color: colors.textMuted }]}>메모</Text>
-                          <Text style={[styles.modalFieldValue, { color: colors.textSec }]}>
-                            {[item.reason?.trim(), item.summaryLine?.trim()].filter(Boolean).join('\n')}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      <View style={styles.modalActions}>
-                        <Pressable
-                          onPress={() => handleExpensePress(item.id)}
-                          style={[styles.modalGhostBtn, { borderColor: colors.border }]}
-                        >
-                          <Text style={[styles.modalGhostBtnText, { color: colors.primary }]}>상세 보기</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => handleEditExpense(item.id)}
-                          style={[styles.modalGhostBtn, { borderColor: '#6366F1' }]}
-                        >
-                          <Text style={[styles.modalGhostBtnText, { color: '#6366F1' }]}>수정</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => handleDeleteExpense(item.id, item.reason, detailDayKey)}
-                          style={[styles.modalGhostBtn, { borderColor: colors.logoutBorder }]}
-                        >
-                          <Text style={[styles.modalGhostBtnText, { color: colors.logoutText }]}>삭제</Text>
-                        </Pressable>
-                      </View>
-                      </View>
-                    </View>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
+        <HomeDayExpenseModal
+          dayKey={detailDayKey}
+          expenses={detailDayExpenses}
+          reviewsByExpenseId={reviewsByExpenseId}
+          reviewSchedulesByExpenseId={reviewSchedulesByExpenseId}
+          onClose={() => setDetailDayKey(null)}
+          onOpenExpense={handleExpensePress}
+          onEditExpense={handleEditExpense}
+          onDeleteExpense={handleDeleteExpense}
+          onReviewExpense={openReviewForExpense}
+          onAddExpense={() => {
+            setDetailDayKey(null);
+            router.push('/add-expense');
+          }}
+        />
       ) : null}
+
+      <ShareNotificationsModal
+        visible={notificationsOpen}
+        userId={user.uid}
+        onClose={handleShareNotificationsClose}
+        onUnreadChange={handleShareUnreadChange}
+      />
     </View>
   );
-}
-
-function toDayKey(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** 같은 날 여러 건일 때 리뷰가 있는 지출이 캘린더 미리보기(1~2줄)에 먼저 오도록 */
-function sortExpensesForCalendarCells(day: Expense[], reviewsByExpenseId: Map<string, Review>): Expense[] {
-  const toneRank = (r: Review) => {
-    const t = sentimentFromDecision(r);
-    if (t === 'negative') return 0;
-    if (t === 'neutral') return 1;
-    return 2;
-  };
-  return [...day].sort((a, b) => {
-    const hasA = reviewsByExpenseId.has(a.id);
-    const hasB = reviewsByExpenseId.has(b.id);
-    if (hasA !== hasB) return hasA ? -1 : 1;
-    if (hasA && hasB) {
-      const ra = reviewsByExpenseId.get(a.id)!;
-      const rb = reviewsByExpenseId.get(b.id)!;
-      const diff = toneRank(ra) - toneRank(rb);
-      if (diff !== 0) return diff;
-    }
-    return b.spentAt.getTime() - a.spentAt.getTime();
-  });
-}
-
-/** 이번 달 지출을 외식(포장)·배달·카페로 합산 (레거시 food는 포장 외식에 포함) */
-function summarizeMonthByCategory(expenses: Expense[]): {
-  takeout: number;
-  delivery: number;
-  cafe: number;
-  total: number;
-} {
-  let takeout = 0;
-  let delivery = 0;
-  let cafe = 0;
-  for (const e of expenses) {
-    const amt = Number(e.amount) || 0;
-    if (e.category === 'delivery') delivery += amt;
-    else if (e.category === 'cafe') cafe += amt;
-    else takeout += amt;
-  }
-  return { takeout, delivery, cafe, total: takeout + delivery + cafe };
-}
-
-function formatMonth(date: Date) {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
-}
-
-function formatDetailDayHeading(dayKey: string): string {
-  const [ys, ms, ds] = dayKey.split('-');
-  const y = Number(ys);
-  const m = Number(ms);
-  const d = Number(ds);
-  if (!y || !m || !d) return dayKey;
-  const dt = new Date(y, m - 1, d);
-  const w = ['일', '월', '화', '수', '목', '금', '토'][dt.getDay()];
-  return `${y}년 ${m}월 ${d}일 (${w})`;
-}
-
-function formatKoreanSpentAt(date: Date): string {
-  const hour = date.getHours();
-  const minute = date.getMinutes();
-  const period = hour >= 12 ? '오후' : '오전';
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  const mm = String(minute).padStart(2, '0');
-  return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()}. ${period} ${h12}:${mm}`;
-}
-
-function expenseCategoryLine(category: ExpenseCategory): string {
-  switch (category) {
-    case 'delivery':
-      return '외식(배달)';
-    case 'cafe':
-      return '외식(카페)';
-    case 'takeout':
-    case 'food':
-    default:
-      return '외식(포장)';
-  }
-}
-
-function formatCalendarAmountChip(amount: number): string {
-  const n = Number(amount);
-  if (!Number.isFinite(n) || n <= 0) return '0';
-  if (n < 10000) {
-    const cheon = Math.round(n / 1000);
-    return `${cheon <= 0 ? 1 : cheon}천`;
-  }
-  const man = n / 10000;
-  const rounded = Math.round(man * 10) / 10;
-  if (rounded === Math.floor(rounded)) return `${Math.floor(rounded)}만`;
-  return `${rounded}만`;
-}
-
-type ReviewSentiment = 'positive' | 'negative' | 'neutral';
-
-/**
- * 캘린더·모달 색. `reviewService`가 Firestore 값을 `normalizeReviewSatisfaction`으로 숫자화하므로
- * 기존 리뷰(문자열 satisfaction, Long 등)도 1~5면 그대로 4~5 초록·3 노랑·1~2 빨강.
- * satisfaction이 없거나 파싱 불가면 `decisionAgain`(yes/maybe/no)으로 동일 3단 톤 폴백.
- */
-function sentimentFromDecision(review: Review): ReviewSentiment {
-  const s = normalizeReviewSatisfaction(review.satisfaction);
-  if (Number.isFinite(s) && s >= 1 && s <= 5) {
-    if (s >= 4) return 'positive';
-    if (s === 3) return 'neutral';
-    return 'negative';
-  }
-  switch (review.decisionAgain) {
-    case 'yes':
-      return 'positive';
-    case 'no':
-      return 'negative';
-    case 'maybe':
-      return 'neutral';
-    default:
-      return 'neutral';
-  }
-}
-
-/** 모달·목록에서 감성 점(만족/보통/불만족) 표시용 — 캘린더 pill과 동일 기준 */
-function sentimentMarkerColor(review: Review, isDark: boolean): string {
-  const tone = sentimentFromDecision(review);
-  if (isDark) {
-    if (tone === 'positive') return '#4ade80';
-    if (tone === 'negative') return '#fb7185';
-    return '#facc15';
-  }
-  if (tone === 'positive') return '#16a34a';
-  if (tone === 'negative') return '#dc2626';
-  return '#ca8a04';
-}
-
-const REVIEW_CALENDAR_TEXT_ON_DARK_PILL = '#f8fafc';
-
-/** 리뷰 완료 항목: 긍정·부정·보통은 배경만 구분 (다크는 불투명 배경으로 빨강도 확실히) */
-function reviewSentimentColors(review: Review, isDark: boolean): { bg: string; text: string } {
-  const tone = sentimentFromDecision(review);
-  if (isDark) {
-    switch (tone) {
-      case 'positive':
-        return { bg: '#14532d', text: REVIEW_CALENDAR_TEXT_ON_DARK_PILL };
-      case 'negative':
-        return { bg: '#9f1239', text: '#fecdd3' };
-      case 'neutral':
-      default:
-        return { bg: '#713f12', text: '#fef9c3' };
-    }
-  }
-  switch (tone) {
-    case 'positive':
-      return { bg: '#E3F4EA', text: '#166534' };
-    case 'negative':
-      return { bg: '#FDE8E8', text: '#b91c1c' };
-    case 'neutral':
-    default:
-      return { bg: '#FEF6D8', text: '#92400e' };
-  }
-}
-
-function reviewSentimentSurface(review: Review, isDark: boolean): {
-  bg: string;
-  text: string;
-  dot: string;
-  border: string;
-} {
-  const base = reviewSentimentColors(review, isDark);
-  const dot = sentimentMarkerColor(review, isDark);
-  const border = isDark ? 'rgba(248, 250, 252, 0.22)' : 'rgba(15, 23, 42, 0.12)';
-  return { bg: base.bg, text: base.text, dot, border };
-}
-
-function buildCalendarCells(currentMonth: Date): Array<number | null> {
-  const first = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-  const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
-  const cells: Array<number | null> = [];
-  for (let i = 0; i < first.getDay(); i += 1) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
 }
 
 const styles = StyleSheet.create({
@@ -1059,51 +709,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  spendingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 4,
-    paddingBottom: 2,
+  /** 기존 스크롤 안 상단 바와 같은 위치·간격: 좌우 16, 아래 marginBottom 4 + gap 절반 */
+  homeHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  spendingHeaderTitle: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  homeHeaderCompact: { paddingBottom: 8 },
   homeTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 4,
+  },
+  listBelowHeader: { paddingTop: 6 },
+  listBelowHeaderCompact: { paddingTop: 4 },
+  homeEyebrow: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginBottom: 1,
   },
   homeGreeting: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
     letterSpacing: -0.5,
     lineHeight: 28,
   },
-  patternSection: {
-    marginTop: 12,
-    marginHorizontal: 16,
-    marginBottom: 4,
-  },
-  patternCardOuter: {
-    borderRadius: 16,
+  notificationButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  patternIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
-  patternTextWrap: { flex: 1, gap: 4 },
-  patternTitle: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
-  patternHeadline: { fontSize: 14, fontWeight: '600', lineHeight: 20 },
-  patternMeta: { fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 2 },
+  notificationDot: {
+    position: 'absolute',
+    right: 8,
+    top: 7,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F05252',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
   list: {
     padding: 16,
     paddingBottom: 120,
@@ -1118,10 +770,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 20,
     padding: 12,
+    paddingBottom: 8,
   },
   calendarCardCompact: {
     borderRadius: 12,
     padding: 8,
+    paddingBottom: 6,
   },
   monthHeader: {
     flexDirection: 'row',
@@ -1148,353 +802,13 @@ const styles = StyleSheet.create({
     width: '14.285%',
     alignItems: 'center',
     paddingHorizontal: 2,
-    paddingVertical: 6,
-  },
-  dayCellCompact: {
-    paddingHorizontal: 1,
-    paddingVertical: 4,
-  },
-  dayNumCircle: {
-    minWidth: 32,
-    minHeight: 32,
-    paddingHorizontal: 6,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayNum: { fontSize: 13, fontWeight: '800' },
-  dayNumCompact: { fontSize: 12 },
-  dayEvents: { gap: 3, width: '100%', alignItems: 'center', marginTop: 4 },
-  eventPill: {
-    borderRadius: 6,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    maxWidth: '100%',
-  },
-  eventPillText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  morePillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    paddingLeft: 2,
-  },
-  breakdownCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  breakdownCardCompact: {
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  breakdownHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  breakdownHeaderLeft: { flex: 1, minWidth: 0 },
-  breakdownHeaderRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
-  },
-  breakdownTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.3 },
-  breakdownSubtitle: { marginTop: 3, fontSize: 12, fontWeight: '600' },
-  breakdownToggleText: { fontSize: 12, fontWeight: '800' },
-  breakdownCollapsedBlock: {
-    marginTop: 10,
-    gap: 8,
-  },
-  breakdownCollapsedTotalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  breakdownCollapsedTotalLabel: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  breakdownCollapsedTotalAmount: {
-    fontSize: 15,
-    fontWeight: '900',
-    letterSpacing: -0.3,
-    flexShrink: 0,
-    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
-  },
-  breakdownCollapsedCatsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  breakdownCollapsedCatCell: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  breakdownCollapsedCatText: {
-    flex: 1,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
-  },
-  daysPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    flexShrink: 0,
-  },
-  daysPillText: { fontSize: 12, fontWeight: '800' },
-  breakdownDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  breakdownDividerBold: {
-    height: StyleSheet.hairlineWidth,
-    marginTop: 4,
-    marginBottom: 10,
-  },
-  breakdownRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 9,
-    gap: 10,
-  },
-  breakdownRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
-  breakdownDot: { width: 8, height: 8, borderRadius: 4 },
-  breakdownRowLabel: { fontSize: 14, fontWeight: '700', flexShrink: 1 },
-  breakdownRowAmount: {
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-    flexShrink: 0,
-    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
-  },
-  breakdownTotalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  breakdownTotalLabel: { fontSize: 15, fontWeight: '900' },
-  breakdownTotalAmount: {
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: -0.4,
-    flexShrink: 0,
-    ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
-  },
-  quickSection: {
-    marginTop: 4, marginBottom: 4,
-    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14, paddingVertical: 12, gap: 10,
-  },
-  quickHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  quickTitle: { fontSize: 14, fontWeight: '700' },
-  quickAddBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: 10, borderWidth: StyleSheet.hairlineWidth,
-  },
-  quickAddBtnText: { fontSize: 12, fontWeight: '700' },
-  quickEmpty: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingVertical: 10, paddingHorizontal: 12,
-    borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed',
-  },
-  quickEmptyText: { fontSize: 12, fontWeight: '600' },
-  quickPresetRow: { flexDirection: 'row', gap: 12, paddingVertical: 2, alignItems: 'flex-start' },
-  quickPresetGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    paddingVertical: 2,
-  },
-  quickPresetWrap: { alignItems: 'center', gap: 6 },
-  quickPresetBtn: {
-    width: 52, height: 52, borderRadius: 26,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  quickPresetLabel: { fontSize: 12, fontWeight: '700', textAlign: 'center' },
-  quickPresetAmount: { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
-  quickPresetActions: { flexDirection: 'row', gap: 4 },
-  quickActionBtn: {
-    width: 22, height: 22, borderRadius: 11,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  breakdownBudgetHint: {
-    marginTop: 10,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18,
+    paddingVertical: 3,
   },
   monthStateWrap: {
     minHeight: 80,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 16,
-  },
-  modalRoot: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 24,
-  },
-  modalCard: {
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    maxWidth: 420,
-    width: '100%',
-    alignSelf: 'center',
-    maxHeight: '82%',
-    overflow: 'hidden',
-    marginHorizontal: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.25,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  modalCardInner: {
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 14,
-  },
-  modalHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  modalHeaderTitle: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  modalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalSub: {
-    marginTop: 6,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  modalScroll: {
-    marginTop: 14,
-    maxHeight: 420,
-  },
-  modalEmpty: {
-    alignItems: 'center',
-    paddingVertical: 28,
-    gap: 10,
-  },
-  modalEmptyText: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modalBlockDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginVertical: 14,
-  },
-  modalExpenseBlock: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 8,
-  },
-  modalEventTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  modalEventTitlePress: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    minWidth: 0,
-  },
-  modalDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginTop: 5,
-  },
-  modalEventTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '800',
-    lineHeight: 22,
-  },
-  modalReviewBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    flexShrink: 0,
-  },
-  modalReviewBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  modalField: {
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  modalFieldLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  modalFieldValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 22,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  modalGhostBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  modalGhostBtnText: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  errorText: {
-    color: '#FF6B6B',
-    fontSize: 16,
-    marginBottom: 16,
   },
   offlineBanner: {
     backgroundColor: '#FFF3CD',
@@ -1507,35 +821,5 @@ const styles = StyleSheet.create({
     color: '#856404',
     fontSize: 14,
     textAlign: 'center',
-  },
-  retryButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  retryText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#999',
-    marginTop: 16,
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  addFirstButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  addFirstText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
 });

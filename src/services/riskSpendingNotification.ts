@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { scheduleReviewReminder } from '@/services/notificationService';
 import { toMonthlyIncomeKrw, resolveReviewReminderEnabled } from '@/lib/accountSettings';
+import { withLocalNotificationAccountId } from '@/lib/localNotificationPayload';
 import { isDeliveryOrTakeout } from '@/lib/categoryAnalytics';
 import type { Account } from '@/lib/types';
 import type { ExpenseCategory } from '@/lib/types';
@@ -33,7 +34,7 @@ export async function scheduleRiskAwarenessAfterExpense(params: RiskParams): Pro
       title: '소비 점검',
       body,
       dueAt,
-      data: { kind: 'risk_nudge' },
+      data: withLocalNotificationAccountId({ kind: 'risk_nudge' }, params.account?.id),
     });
   } catch {
     // 알림 실패는 무시

@@ -8,12 +8,14 @@ import {
   InsightsScreenPreview,
   NotificationScreenPreview,
   RegretAnalysisScreenPreview,
+  RecordReasonScreenPreview,
+  RegretIndexScreenPreview,
   ReviewScreenPreview,
   WeeklyRegretChartPreview,
 } from '@/components/home/mockScreens';
 import { HeroDashboardPreview } from '@/components/home/HeroDashboardPreview';
 
-export type PhoneScreenKey = ScreenshotKey | 'notification' | 'community' | 'regret-analysis' | 'weekly-regret' | 'hero-dashboard';
+export type PhoneScreenKey = ScreenshotKey | 'notification' | 'community' | 'regret-analysis' | 'record-reason' | 'regret-index' | 'weekly-regret' | 'hero-dashboard';
 
 type Props = {
   screen: PhoneScreenKey;
@@ -37,6 +39,8 @@ function ScreenContent({ screen }: { screen: PhoneScreenKey }) {
   if (screen === 'insights') return <InsightsScreenPreview />;
   if (screen === 'review') return <ReviewScreenPreview />;
   if (screen === 'regret-analysis') return <RegretAnalysisScreenPreview />;
+  if (screen === 'record-reason') return <RecordReasonScreenPreview />;
+  if (screen === 'regret-index') return <RegretIndexScreenPreview />;
   if (screen === 'weekly-regret') return <WeeklyRegretChartPreview />;
   if (screen === 'notification') return <NotificationScreenPreview />;
   if (screen === 'hero-dashboard') return <HeroDashboardPreview />;

@@ -10,6 +10,7 @@ import {
   MoodInsight,
   TimeOfDayInsight,
   WeekdayInsight,
+  WeekdayTimeCell,
   type Account,
   type FoodBudgetInsight,
   type IncomeInsight,
@@ -17,7 +18,26 @@ import {
 } from '@/lib/types';
 import { budgetPeriodForInsightsWindow } from '@/lib/budgetPeriod';
 import { normalizeExpenseMood, EXPENSE_MOOD_OPTIONS } from '@/lib/expenseMood';
+import {
+  buildRegretPeriodSnapshot,
+  buildRegretTrendRates,
+  computeRegretAmountKrw,
+  filterRegretReviews,
+  previousInsightsWindow,
+  reviewsForExpenses,
+} from '@/lib/regretSummaryInsight';
 import { getTimeOfDay } from '@/utils/time';
+import { canonicalFoodCategory, type FoodCategoryKey } from '@/lib/categoryColors';
+import { expenseCategoryLabel } from '@/lib/expenseCategoryLabel';
+
+function sumCategoryAmounts(expenses: Expense[]): Record<FoodCategoryKey, number> {
+  const out: Record<FoodCategoryKey, number> = { takeout: 0, delivery: 0, cafe: 0 };
+  for (const e of expenses) {
+    const key = canonicalFoodCategory(e.category);
+    out[key] += e.amount || 0;
+  }
+  return out;
+}
 
 function buildIncomeInsight(
   totalSpendKrw: number,
@@ -105,7 +125,7 @@ export const insightsService = {
         (e) => e.spentAt >= startDate && e.spentAt <= endDate
       );
 
-      // 기간 내 리뷰 조회
+      // 계정 전체 리뷰. 소비 후회율은 spentAt 기간의 소비에 최신 리뷰를 붙인다.
       const reviews = await withTimeout(
         reviewService.getByAccountId(accountId),
         4000,
@@ -115,12 +135,34 @@ export const insightsService = {
         (r) => r.reviewedAt >= startDate && r.reviewedAt <= endDate
       );
 
-    // 후회 판단: decisionAgain === 'no' 또는 satisfaction <= 2
-    const regretReviews = periodReviews.filter(
-      (r) => r.decisionAgain === 'no' || r.satisfaction <= 2
-    );
+    // 카테고리·요일·히트맵 등 '기록 대비' 지표는 기존처럼 기간 내 작성된 후회 리뷰를 사용
+    const regretReviews = filterRegretReviews(periodReviews);
 
     const expenseMap = new Map(periodExpenses.map((e) => [e.id, e]));
+
+    const prevWindow = previousInsightsWindow(window);
+    const { start: prevStart, end: prevEnd } = boundsForInsightsWindow(prevWindow, account);
+    const prevExpenses = expenses.filter((e) => e.spentAt >= prevStart && e.spentAt <= prevEnd);
+    const previousPeriod =
+      prevExpenses.length > 0
+        ? buildRegretPeriodSnapshot(prevExpenses, reviews)
+        : null;
+    const previousCategoryAmounts =
+      prevExpenses.length > 0 ? sumCategoryAmounts(prevExpenses) : null;
+
+    const periodExpenseReviews = reviewsForExpenses(periodExpenses, reviews);
+    const currentSnapshot = buildRegretPeriodSnapshot(periodExpenses, reviews);
+    const regretAmountKrw = computeRegretAmountKrw(
+      filterRegretReviews(periodExpenseReviews),
+      expenseMap,
+    );
+    const regretTrendRates = buildRegretTrendRates(
+      window,
+      startDate,
+      endDate,
+      periodExpenses,
+      reviews,
+    );
 
     const weekdayExpenseCounts = [0, 0, 0, 0, 0, 0, 0];
     const weekdayCategoryCounts: Array<Record<string, number>> = Array.from({ length: 7 }, () => ({}));
@@ -160,6 +202,12 @@ export const insightsService = {
       expenseMap
     );
 
+    const weekdayTimeInsights = this.calculateWeekdayTimeInsights(
+      periodExpenses,
+      regretReviews,
+      expenseMap,
+    );
+
     const totalSpendKrw = periodExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
     const incomeInsight = buildIncomeInsight(totalSpendKrw, monthlyIncomeKrw, window);
     const foodBudgetInsight = buildFoodBudgetInsight(totalSpendKrw, foodBudgetKrw, window, account);
@@ -168,7 +216,8 @@ export const insightsService = {
     const patterns = this.generatePatterns(
       categoryInsights,
       periodExpenses.length,
-      regretReviews.length,
+      currentSnapshot.totalRegrets,
+      currentSnapshot.totalReviews,
       incomeInsight,
       foodBudgetInsight,
       window.mode,
@@ -181,15 +230,18 @@ export const insightsService = {
         moodInsights,
         timeOfDayInsights,
         weekdayInsights,
+        weekdayTimeInsights,
         weekdayExpenseCounts,
         weekdayCategoryCounts,
-        totalExpenses: periodExpenses.length,
+        totalExpenses: currentSnapshot.totalExpenses,
         totalSpendKrw,
-        totalRegrets: regretReviews.length,
-        overallRegretRate:
-          periodExpenses.length > 0
-            ? (regretReviews.length / periodExpenses.length) * 100
-            : 0,
+        totalRegrets: currentSnapshot.totalRegrets,
+        overallRegretRate: currentSnapshot.overallRegretRate,
+        totalReviews: currentSnapshot.totalReviews,
+        regretAmountKrw,
+        previousPeriod,
+        previousCategoryAmounts,
+        regretTrendRates,
         incomeInsight,
         foodBudgetInsight,
         patterns,
@@ -218,17 +270,21 @@ export const insightsService = {
     regretReviews: Review[],
     expenseMap: Map<string, Expense>
   ) {
-    const categoryMap = new Map<ExpenseCategory, { total: number; regrets: number }>();
+    const categoryMap = new Map<ExpenseCategory, { total: number; regrets: number; amount: number }>();
 
     expenses.forEach((expense) => {
-      const current = categoryMap.get(expense.category) || { total: 0, regrets: 0 };
-      categoryMap.set(expense.category, { ...current, total: current.total + 1 });
+      const current = categoryMap.get(expense.category) || { total: 0, regrets: 0, amount: 0 };
+      categoryMap.set(expense.category, {
+        ...current,
+        total: current.total + 1,
+        amount: current.amount + (expense.amount || 0),
+      });
     });
 
     regretReviews.forEach((review) => {
       const expense = expenseMap.get(review.expenseId);
       if (expense) {
-        const current = categoryMap.get(expense.category) || { total: 0, regrets: 0 };
+        const current = categoryMap.get(expense.category) || { total: 0, regrets: 0, amount: 0 };
         categoryMap.set(expense.category, { ...current, regrets: current.regrets + 1 });
       }
     });
@@ -236,6 +292,7 @@ export const insightsService = {
     return Array.from(categoryMap.entries()).map(([category, data]) => ({
       category,
       totalCount: data.total,
+      totalAmountKrw: data.amount,
       regretCount: data.regrets,
       regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
     }));
@@ -252,6 +309,7 @@ export const insightsService = {
     }
 
     expenses.forEach((expense) => {
+      if (!expense.mood) return;
       const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
       if (!moodMap.has(mood)) return;
       const current = moodMap.get(mood)!;
@@ -260,7 +318,7 @@ export const insightsService = {
 
     regretReviews.forEach((review) => {
       const expense = expenseMap.get(review.expenseId);
-      if (!expense) return;
+      if (!expense?.mood) return;
       const mood = normalizeExpenseMood(expense.mood) as ExpenseMood;
       if (!moodMap.has(mood)) return;
       const current = moodMap.get(mood)!;
@@ -354,10 +412,64 @@ export const insightsService = {
     });
   },
 
+  calculateWeekdayTimeInsights(
+    expenses: Expense[],
+    regretReviews: Review[],
+    expenseMap: Map<string, Expense>,
+  ): WeekdayTimeCell[] {
+    const timeOrder = ['morning', 'afternoon', 'evening', 'night'] as const;
+    const cellMap = new Map<string, { total: number; regrets: number; amount: number }>();
+
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      for (const slot of timeOrder) {
+        cellMap.set(`${weekday}:${slot}`, { total: 0, regrets: 0, amount: 0 });
+      }
+    }
+
+    expenses.forEach((expense) => {
+      const weekday = expense.spentAt.getDay();
+      const timeOfDay = getTimeOfDay(expense.spentAt);
+      const key = `${weekday}:${timeOfDay}`;
+      const current = cellMap.get(key)!;
+      cellMap.set(key, {
+        ...current,
+        total: current.total + 1,
+        amount: current.amount + (expense.amount || 0),
+      });
+    });
+
+    regretReviews.forEach((review) => {
+      const expense = expenseMap.get(review.expenseId);
+      if (!expense) return;
+      const weekday = expense.spentAt.getDay();
+      const timeOfDay = getTimeOfDay(expense.spentAt);
+      const key = `${weekday}:${timeOfDay}`;
+      const current = cellMap.get(key)!;
+      cellMap.set(key, { ...current, regrets: current.regrets + 1 });
+    });
+
+    const cells: WeekdayTimeCell[] = [];
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      for (const timeOfDay of timeOrder) {
+        const data = cellMap.get(`${weekday}:${timeOfDay}`)!;
+        cells.push({
+          weekday,
+          timeOfDay,
+          totalCount: data.total,
+          regretCount: data.regrets,
+          regretRate: data.total > 0 ? (data.regrets / data.total) * 100 : 0,
+          totalAmountKrw: data.amount,
+        });
+      }
+    }
+    return cells;
+  },
+
   generatePatterns(
     categoryInsights: CategoryInsight[],
     totalExpenses: number,
     totalRegrets: number,
+    totalReviews: number,
     incomeInsight: IncomeInsight | null,
     foodBudgetInsight: FoodBudgetInsight | null,
     periodMode: 'month' | 'year',
@@ -391,24 +503,18 @@ export const insightsService = {
       }
     }
 
-    if (totalExpenses === 0) {
+    if (totalExpenses === 0 || totalReviews === 0) {
       return patterns.slice(0, 2);
     }
 
-    const regretRate = (totalRegrets / totalExpenses) * 100;
+    const regretRate = (totalRegrets / totalReviews) * 100;
 
     const topRegretCategory = categoryInsights
       .filter((c) => c.totalCount >= 3)
       .sort((a, b) => b.regretRate - a.regretRate)[0];
 
     if (topRegretCategory && topRegretCategory.regretRate > 40) {
-      const catKo: Record<string, string> = {
-        takeout: '외식(포장)',
-        delivery: '배달',
-        cafe: '카페',
-        food: '외식(포장)',
-      };
-      const label = catKo[topRegretCategory.category] ?? topRegretCategory.category;
+      const label = expenseCategoryLabel(topRegretCategory.category);
       patterns.push(`"${label}"에서 후회 비율이 ${topRegretCategory.regretRate.toFixed(0)}%예요.`);
     } else if (regretRate >= 35) {
       patterns.push(`기간 내 후회 비율이 ${regretRate.toFixed(0)}%입니다.`);

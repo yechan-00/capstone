@@ -23,7 +23,7 @@ export function StoryRecordSection() {
         <View style={[styles.row, isMobile && styles.rowMobile]}>
           <RevealSection style={styles.phoneWrap}>
             <View style={styles.phoneBlob} pointerEvents="none" />
-            <PhoneFrame screen="regret-analysis" size="hero" rotate={isMobile ? 0 : -2} />
+            <PhoneFrame screen="record-reason" size="hero" rotate={isMobile ? 0 : -2} lightBezel />
           </RevealSection>
 
           <View style={[styles.copyCol, isMobile && styles.copyColMobile]}>

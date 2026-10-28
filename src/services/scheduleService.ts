@@ -16,7 +16,7 @@ import {
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { db } from '@/lib/firebase';
-import { ReviewSchedule, ScheduleStatus, ScheduleType } from '@/lib/types';
+import { Account, ReviewSchedule, ScheduleStatus, ScheduleType } from '@/lib/types';
 import { requireUserIdFromAccountId } from '@/lib/accountId';
 import { mapScheduleDoc } from '@/utils/firestore';
 import { isReviewWindowOpen, isReviewWindowExpired, isReviewEvaluable } from '@/lib/reviewWindow';
@@ -27,6 +27,8 @@ import {
   computeReviewOpensAt,
 } from '@/lib/reviewWindow';
 import { cancelReminder, scheduleReviewReminder } from '@/services/notificationService';
+import { resolveReviewReminderEnabled } from '@/lib/accountSettings';
+import { withLocalNotificationAccountId } from '@/lib/localNotificationPayload';
 
 const COLLECTION_NAME = 'review_schedules';
 
@@ -70,7 +72,8 @@ export const scheduleService = {
     spentAt: Date
   ): Promise<void> {
     const userId = requireUserIdFromAccountId(accountId);
-    const notificationTime = await this.getAccountNotificationTime(accountId);
+    const reminderSettings = await this.getAccountReviewReminderSettings(accountId);
+    const notificationTime = reminderSettings.notificationTime;
     const opensAt = computeReviewOpensAt(spentAt);
     const expiresAt = computeReviewExpiresAt(spentAt);
     const notifyAt = computeReviewNotificationAt(spentAt, notificationTime);
@@ -94,9 +97,13 @@ export const scheduleService = {
       createdAt: serverTimestamp(),
     });
 
+    if (!reminderSettings.enabled) {
+      return;
+    }
+
     let notificationId = '';
     try {
-      notificationId = await this.scheduleNotification(expenseId, notifyAt, scheduleRef.id);
+      notificationId = await this.scheduleNotification(expenseId, notifyAt, scheduleRef.id, accountId);
       if (notificationId) {
         await updateDoc(scheduleRef, { notificationId });
       }
@@ -105,14 +112,22 @@ export const scheduleService = {
     }
   },
 
-  async scheduleNotification(expenseId: string, notifyAt: Date, scheduleId: string): Promise<string> {
+  async scheduleNotification(
+    expenseId: string,
+    notifyAt: Date,
+    scheduleId: string,
+    accountId: string,
+  ): Promise<string> {
     try {
       const { title, body } = reviewNotificationCopy();
       const notificationId = await scheduleReviewReminder({
         title,
         body,
         dueAt: notifyAt,
-        data: { kind: 'review_reminder', expenseId, scheduleId, scheduleType: 'd1' },
+        data: withLocalNotificationAccountId(
+          { kind: 'review_reminder', expenseId, scheduleId, scheduleType: 'd1' },
+          accountId,
+        ),
       });
       return notificationId;
     } catch (error) {
@@ -267,6 +282,49 @@ export const scheduleService = {
     }
   },
 
+  /**
+   * 지출별 pending·expired 스케줄 전체 (dueAt 오름차순).
+   * 홈/상세 공통 상태 계산용. 평가 가능 여부는 클라이언트에서 판단한다.
+   */
+  async getActiveSchedulesByExpenseIds(
+    accountId: string,
+    expenseIds: string[],
+  ): Promise<Map<string, ReviewSchedule[]>> {
+    const unique = [...new Set(expenseIds.filter((id) => typeof id === 'string' && id.length > 0))];
+    const result = new Map<string, ReviewSchedule[]>();
+    if (unique.length === 0) return result;
+
+    try {
+      for (let i = 0; i < unique.length; i += EXPENSE_ID_IN_CHUNK) {
+        const chunk = unique.slice(i, i + EXPENSE_ID_IN_CHUNK);
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where('accountId', '==', accountId),
+          where('expenseId', 'in', chunk),
+          where('status', 'in', ['pending', 'expired']),
+        );
+        const snapshot = await getDocs(q);
+        for (const docSnap of snapshot.docs) {
+          const schedule = mapScheduleDoc(docSnap);
+          const eid = schedule.expenseId;
+          const list = result.get(eid) ?? [];
+          list.push(schedule);
+          result.set(eid, list);
+        }
+      }
+      result.forEach((list, eid) => {
+        result.set(
+          eid,
+          list.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime()),
+        );
+      });
+      return result;
+    } catch (error) {
+      console.error('Failed to get active schedules by expense ids:', error);
+      throw new Error('지출별 리뷰 스케줄을 조회하는데 실패했습니다.');
+    }
+  },
+
   async getSchedulesByExpenseId(expenseId: string, accountId: string): Promise<ReviewSchedule[]> {
     try {
       const q = query(
@@ -401,20 +459,33 @@ export const scheduleService = {
     });
   },
 
-  async getAccountNotificationTime(accountId: string): Promise<string | undefined> {
+  async getAccountReviewReminderSettings(accountId: string): Promise<{
+    notificationTime?: string;
+    enabled: boolean;
+  }> {
     try {
       const accountDoc = await getDoc(doc(db, 'accounts', accountId));
       if (!accountDoc.exists()) {
-        return undefined;
+        return { enabled: resolveReviewReminderEnabled(null) };
       }
 
       const data = accountDoc.data();
       const t = data.reviewReminderTime ?? data.notificationTime;
-      return typeof t === 'string' ? t : undefined;
+      return {
+        notificationTime: typeof t === 'string' ? t : undefined,
+        enabled: resolveReviewReminderEnabled({
+          reviewReminderEnabled: data.reviewReminderEnabled,
+        } as Account),
+      };
     } catch (error) {
-      console.error('Failed to get account notification time:', error);
-      return undefined;
+      console.error('Failed to get account review reminder settings:', error);
+      return { enabled: resolveReviewReminderEnabled(null) };
     }
+  },
+
+  async getAccountNotificationTime(accountId: string): Promise<string | undefined> {
+    const settings = await this.getAccountReviewReminderSettings(accountId);
+    return settings.notificationTime;
   },
 
   async getAccountReviewDelayDays(accountId: string): Promise<(1 | 3 | 7 | 30)[]> {
@@ -488,6 +559,7 @@ export const scheduleService = {
           schedule.expenseId,
           notifyAt,
           snap.id,
+          accountId,
         );
         if (notificationId) {
           await updateDoc(doc(db, COLLECTION_NAME, snap.id), { notificationId });

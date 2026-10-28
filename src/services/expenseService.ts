@@ -17,6 +17,7 @@ import { resolveDocumentUserId, resolveUserId } from '@/lib/accountId';
 import { Expense } from '@/lib/types';
 import { normalizeExpenseCategory } from '@/lib/categoryAnalytics';
 import { scheduleService } from './scheduleService';
+import { parseExpenseImageUrlsField } from '@/utils/expenseImage';
 import { timestampToDate } from '@/utils/firestore';
 import { cancelReminder } from '@/services/notificationService';
 
@@ -49,6 +50,7 @@ function toExpense(id: string, data: Record<string, unknown>): Expense {
     summaryLine: data.summaryLine as string | undefined,
     summaryEmoji: data.summaryEmoji as string | undefined,
     imageUrl: (data.imageUrl as string | null | undefined) ?? null,
+    imageUrls: parseExpenseImageUrlsField(data.imageUrls),
     spentAt: timestampToDate(data.spentAt as any),
     sourceType: (data.sourceType as Expense['sourceType']) ?? 'manual',
     sourceRef: (data.sourceRef as string | null | undefined) ?? null,

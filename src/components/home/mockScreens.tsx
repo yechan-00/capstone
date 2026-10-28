@@ -283,6 +283,117 @@ export function RegretAnalysisScreenPreview() {
   );
 }
 
+/** 섹션 3 — 지출 이유 기록 화면 */
+export function RecordReasonScreenPreview() {
+  return (
+    <View style={styles.root} {...WEB_NO_TRANSLATE}>
+      <AppStatusBar />
+      <View style={styles.recordHeader}>
+        <MaterialIcons name="arrow-back-ios" size={14} color={NAVY} />
+        <HomeText style={styles.recordHeaderTitle}>지출 분석</HomeText>
+        <View style={{ width: 14 }} />
+      </View>
+      <View style={styles.body}>
+        <View style={styles.recordExpenseCard}>
+          <View style={[styles.dailyIcon, { backgroundColor: '#FFF3E0' }]}>
+            <Text style={styles.dailyIconText}>☕</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <HomeText style={styles.recordExpenseTitle}>카페 라떼</HomeText>
+            <HomeText style={styles.recordExpenseMeta}>2024. 05. 21 (화) 14:35 · 신용카드</HomeText>
+          </View>
+          <HomeText style={styles.recordExpenseAmount}>4,800원</HomeText>
+        </View>
+
+        <HomeText style={styles.recordSectionLabel}>이 지출의 이유</HomeText>
+        <View style={styles.recordQuoteBox}>
+          <HomeText style={styles.recordQuoteMark}>“</HomeText>
+          <HomeText style={styles.recordQuoteText}>
+            업무 스트레스로 잠시 휴식이 필요해서 나에게 작은 보상을 주고 싶었어요.
+          </HomeText>
+        </View>
+
+        <HomeText style={styles.recordSectionLabel}>감정 태그</HomeText>
+        <View style={styles.recordTagRow}>
+          <View style={[styles.recordTag, { backgroundColor: '#FFEBEE' }]}>
+            <Text style={styles.recordTagEmoji}>😫</Text>
+            <HomeText style={[styles.recordTagText, { color: '#E53935' }]}>Stress</HomeText>
+          </View>
+          <View style={[styles.recordTag, { backgroundColor: '#FFF8E1' }]}>
+            <Text style={styles.recordTagEmoji}>🎁</Text>
+            <HomeText style={[styles.recordTagText, { color: '#F9A825' }]}>Reward</HomeText>
+          </View>
+          <View style={[styles.recordTag, { backgroundColor: HOME.gray }]}>
+            <Text style={styles.recordTagEmoji}>🧘</Text>
+            <HomeText style={[styles.recordTagText, { color: HOME.textSec }]}>휴식</HomeText>
+          </View>
+        </View>
+
+        <View style={styles.recordInsightBox}>
+          <View style={styles.recordInsightIcon}>
+            <MaterialIcons name="show-chart" size={16} color={HOME.green} />
+          </View>
+          <HomeText style={styles.recordInsightText}>
+            최근 비슷한 스트레스 상황에서 카페 지출이 늘고 있어요. 나만의 스트레스 해소 루틴을 만들어볼까요?
+          </HomeText>
+        </View>
+
+        <View style={styles.recordPatternRow}>
+          <View style={{ flex: 1 }}>
+            <HomeText style={styles.recordPatternLabel}>유사 지출 패턴</HomeText>
+            <HomeText style={styles.recordPatternStat}>최근 30일 · 스트레스 상황 6회 · 평균 4,500원</HomeText>
+          </View>
+          <View style={styles.recordMiniBars}>
+            {[18, 28, 22, 34, 40].map((h, i) => (
+              <View key={i} style={[styles.recordMiniBar, { height: h, opacity: i >= 3 ? 1 : 0.45 }]} />
+            ))}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/** 섹션 6 CTA — 오늘의 후회지수 대시보드 */
+export function RegretIndexScreenPreview() {
+  return (
+    <View style={styles.root} {...WEB_NO_TRANSLATE}>
+      <AppStatusBar />
+      <View style={styles.regretHeader}>
+        <HomeText style={styles.regretHeaderTitle}>오늘의 후회지수</HomeText>
+        <MaterialIcons name="info-outline" size={16} color={HOME.textMuted} />
+      </View>
+      <View style={styles.body}>
+        <View style={styles.regretGaugeCard}>
+          <View style={styles.regretGaugeArc}>
+            <View style={styles.regretGaugeTrack} />
+            <View style={styles.regretGaugeFill} />
+            <View style={styles.regretGaugeCenter}>
+              <Text style={styles.regretGaugeScore}>32</Text>
+              <Text style={styles.regretGaugeMax}>/ 100</Text>
+            </View>
+          </View>
+          <HomeText style={styles.regretGaugeDelta}>지난주보다 15% 좋아졌어요!</HomeText>
+        </View>
+
+        <View style={styles.regretStatCard}>
+          <HomeText style={styles.regretStatLabel}>이번 달 후회 금액</HomeText>
+          <HomeText style={styles.regretStatValue}>128,000원</HomeText>
+          <HomeText style={styles.regretStatSub}>지난 달보다 32,000원 절약했어요 ↓</HomeText>
+        </View>
+
+        <View style={styles.regretStatCard}>
+          <HomeText style={styles.regretStatLabel}>가장 후회된 소비</HomeText>
+          <View style={styles.regretListItem}>
+            <HomeText style={styles.regretListTitle}>"충동적으로 산 옷"</HomeText>
+            <HomeText style={styles.regretListAmount}>43,000원</HomeText>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export function ReviewScreenPreview() {
   return (
     <View style={styles.root} {...WEB_NO_TRANSLATE}>
@@ -384,9 +495,9 @@ export function NotificationScreenPreview() {
       <View style={styles.lockContent}>
         <View style={styles.lockTop}>
           <MaterialIcons name="lock" size={13} color="rgba(255,255,255,0.88)" />
-          <Text style={styles.lockDate}>9월 20일 금요일</Text>
+          <Text style={styles.lockDate}>5월 16일 금요일</Text>
           <View style={styles.lockClockWrap}>
-            <Text style={styles.lockTime}>8:59</Text>
+            <Text style={styles.lockTime}>9:00</Text>
           </View>
         </View>
 
@@ -905,4 +1016,149 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     includeFontPadding: false,
   },
+  recordHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: HOME.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HOME.gray,
+  },
+  recordHeaderTitle: { fontSize: 15, fontWeight: '800', color: NAVY },
+  recordExpenseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: HOME.white,
+    borderRadius: 14,
+    padding: 12,
+  },
+  recordExpenseTitle: { fontSize: 14, fontWeight: '800', color: NAVY },
+  recordExpenseMeta: { fontSize: 9, fontWeight: '600', color: HOME.textMuted, marginTop: 3 },
+  recordExpenseAmount: { fontSize: 14, fontWeight: '900', color: NAVY },
+  recordSectionLabel: { fontSize: 11, fontWeight: '800', color: NAVY, marginTop: 4 },
+  recordQuoteBox: {
+    backgroundColor: HOME.greenLight,
+    borderRadius: 14,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: HOME.green,
+    gap: 4,
+  },
+  recordQuoteMark: { fontSize: 22, fontWeight: '900', color: HOME.green, lineHeight: 22 },
+  recordQuoteText: { fontSize: 11, lineHeight: 17, fontWeight: '600', color: NAVY },
+  recordTagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  recordTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  recordTagEmoji: { fontSize: 11 },
+  recordTagText: { fontSize: 10, fontWeight: '800' },
+  recordInsightBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: HOME.white,
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: `${HOME.green}33`,
+  },
+  recordInsightIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: HOME.greenLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordInsightText: { flex: 1, fontSize: 10, lineHeight: 15, fontWeight: '600', color: HOME.textSec },
+  recordPatternRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: HOME.white,
+    borderRadius: 14,
+    padding: 12,
+  },
+  recordPatternLabel: { fontSize: 10, fontWeight: '800', color: NAVY },
+  recordPatternStat: { fontSize: 9, fontWeight: '600', color: HOME.textMuted, marginTop: 4, lineHeight: 13 },
+  recordMiniBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 40 },
+  recordMiniBar: { width: 6, borderRadius: 3, backgroundColor: HOME.green },
+  regretHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    backgroundColor: HOME.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HOME.gray,
+  },
+  regretHeaderTitle: { fontSize: 14, fontWeight: '800', color: NAVY },
+  regretGaugeCard: {
+    backgroundColor: HOME.white,
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    gap: 8,
+  },
+  regretGaugeArc: {
+    width: 140,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    position: 'relative',
+  },
+  regretGaugeTrack: {
+    position: 'absolute',
+    bottom: 0,
+    width: 140,
+    height: 70,
+    borderTopLeftRadius: 70,
+    borderTopRightRadius: 70,
+    borderWidth: 10,
+    borderBottomWidth: 0,
+    borderColor: HOME.gray,
+  },
+  regretGaugeFill: {
+    position: 'absolute',
+    bottom: 0,
+    width: 140,
+    height: 70,
+    borderTopLeftRadius: 70,
+    borderTopRightRadius: 70,
+    borderWidth: 10,
+    borderBottomWidth: 0,
+    borderColor: HOME.green,
+    borderRightColor: 'transparent',
+    transform: [{ rotate: '-55deg' }],
+  },
+  regretGaugeCenter: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 4 },
+  regretGaugeScore: { fontSize: 28, fontWeight: '900', color: NAVY },
+  regretGaugeMax: { fontSize: 12, fontWeight: '700', color: HOME.textMuted },
+  regretGaugeDelta: { fontSize: 10, fontWeight: '700', color: HOME.green },
+  regretStatCard: {
+    backgroundColor: HOME.white,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
+  },
+  regretStatLabel: { fontSize: 10, fontWeight: '700', color: HOME.textMuted },
+  regretStatValue: { fontSize: 18, fontWeight: '900', color: NAVY },
+  regretStatSub: { fontSize: 9, fontWeight: '700', color: HOME.green, marginTop: 2 },
+  regretListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  regretListTitle: { fontSize: 11, fontWeight: '700', color: NAVY, flex: 1 },
+  regretListAmount: { fontSize: 11, fontWeight: '800', color: HOME.accentOrange },
 });

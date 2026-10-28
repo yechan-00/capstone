@@ -5,6 +5,12 @@ import {
 } from "expo-notifications";
 import { Platform } from "react-native";
 import { computeReviewNotificationAt } from '@/lib/reviewWindow';
+import {
+  classifyLocalNotificationOwner,
+  readNotificationKind,
+  readNotificationSlotId,
+  type AppLocalNotificationKind,
+} from '@/lib/localNotificationPayload';
 
 /** 신규 소비는 소비 다음 날 리뷰 알림 스케줄 */
 export type ReviewScheduleTiming = "d1";
@@ -44,6 +50,42 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   }
 
   return granted;
+}
+
+export type NotificationPermissionKind = 'granted' | 'denied' | 'undetermined' | 'unknown';
+
+/** 권한 팝업 없이 현재 상태만 읽습니다. 웹은 unknown. */
+export async function getNotificationPermissionKind(): Promise<NotificationPermissionKind> {
+  if (Platform.OS === 'web') return 'unknown';
+  try {
+    const settings = await Notifications.getPermissionsAsync();
+    const displayable =
+      settings.granted ||
+      settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+    if (displayable) return 'granted';
+    const undetermined =
+      settings.status === Notifications.PermissionStatus.UNDETERMINED ||
+      settings.ios?.status === Notifications.IosAuthorizationStatus.NOT_DETERMINED;
+    if (undetermined || settings.canAskAgain) return 'undetermined';
+    return 'denied';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * 예방 알림을 ON으로 저장하기 전 권한 확인.
+ * 홈 바텀시트와 동일한 정책입니다. OFF 경로에서는 호출하지 마세요.
+ */
+export async function ensurePermissionToEnablePatternAlerts(): Promise<
+  'granted' | 'denied' | 'request_denied' | 'skipped'
+> {
+  if (Platform.OS === 'web') return 'skipped';
+  const current = await getNotificationPermissionKind();
+  if (current === 'denied') return 'denied';
+  if (current === 'granted') return 'granted';
+  const granted = await ensureNotificationPermission();
+  return granted ? 'granted' : 'request_denied';
 }
 
 export async function scheduleReviewReminder(params: {
@@ -156,4 +198,183 @@ export async function cancelStaleScheduledDateNotifications(): Promise<void> {
   } catch (e) {
     console.warn("[notifications] cancelStaleScheduledDateNotifications", e);
   }
+}
+
+export type ScheduledTrigger = {
+  type: string;
+  hour?: number;
+  minute?: number;
+  weekday?: number;
+  repeats?: boolean;
+  readable: boolean;
+};
+
+export type ScheduledLocalNotification = {
+  identifier: string;
+  kind: string | null;
+  slotId: string | null;
+  owner: ReturnType<typeof classifyLocalNotificationOwner>;
+  trigger: ScheduledTrigger;
+};
+
+function asTriggerRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function readTriggerNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+export function parseScheduledTrigger(raw: unknown): ScheduledTrigger {
+  const trigger = asTriggerRecord(raw);
+  const components = asTriggerRecord(trigger.dateComponents);
+  const hour = readTriggerNumber(trigger.hour) ?? readTriggerNumber(components.hour);
+  const minute = readTriggerNumber(trigger.minute) ?? readTriggerNumber(components.minute);
+  const weekday = readTriggerNumber(trigger.weekday) ?? readTriggerNumber(components.weekday);
+  const repeats = typeof trigger.repeats === 'boolean' ? trigger.repeats : undefined;
+  let type = typeof trigger.type === 'string' ? trigger.type : 'unknown';
+  if (type === 'calendar' && weekday != null) type = 'weekly';
+  if (type === 'calendar' && weekday == null && hour != null && minute != null) type = 'daily';
+  const readable =
+    hour != null &&
+    minute != null &&
+    ((type === 'weekly' && weekday != null) || type === 'daily');
+  return { type, hour, minute, weekday, repeats, readable };
+}
+
+export type CancelLocalNotificationsResult = {
+  scanned: number;
+  currentAccount: number;
+  attempted: number;
+  cancelled: number;
+  failed: number;
+  legacyUnknown: number;
+  remainingCurrent: number;
+  listFailed: boolean;
+};
+
+const emptyCancelResult = (): CancelLocalNotificationsResult => ({
+  scanned: 0,
+  currentAccount: 0,
+  attempted: 0,
+  cancelled: 0,
+  failed: 0,
+  legacyUnknown: 0,
+  remainingCurrent: 0,
+  listFailed: false,
+});
+
+export async function listScheduledLocalNotifications(
+  currentAccountId?: string | null,
+): Promise<{ items: ScheduledLocalNotification[]; listFailed: boolean }> {
+  if (Platform.OS === 'web') {
+    return { items: [], listFailed: false };
+  }
+  try {
+    const list = await getAllScheduledNotificationsAsync();
+    return {
+      listFailed: false,
+      items: list.map((req) => ({
+        identifier: req.identifier,
+        kind: readNotificationKind(req.content.data),
+        slotId: readNotificationSlotId(req.content.data),
+        owner: classifyLocalNotificationOwner(req.content.data, currentAccountId),
+        trigger: parseScheduledTrigger(req.trigger),
+      })),
+    };
+  } catch {
+    console.warn('[notifications] listScheduledLocalNotifications failed');
+    return { items: [], listFailed: true };
+  }
+}
+
+/**
+ * 현재 계정 소유로 확인된 로컬 알림만 취소합니다.
+ * other_account / legacy_unknown / unrelated / 허용되지 않은 kind는 보존합니다.
+ */
+export async function cancelLocalNotificationsForAccount(
+  accountId: string,
+  kinds?: readonly AppLocalNotificationKind[],
+): Promise<CancelLocalNotificationsResult> {
+  const result = emptyCancelResult();
+  if (!accountId || Platform.OS === 'web') return result;
+
+  const allowed = kinds && kinds.length > 0 ? new Set(kinds) : null;
+  const listed = await listScheduledLocalNotifications(accountId);
+  if (listed.listFailed) {
+    result.listFailed = true;
+    return result;
+  }
+
+  result.scanned = listed.items.length;
+  result.legacyUnknown = listed.items.filter((item) => item.owner === 'legacy_unknown').length;
+
+  const targets = listed.items.filter((item) => {
+    if (item.owner !== 'current_account') return false;
+    if (!allowed) return true;
+    return item.kind != null && allowed.has(item.kind as AppLocalNotificationKind);
+  });
+  result.currentAccount = targets.length;
+  result.attempted = targets.length;
+
+  const failedIds = new Set<string>();
+  for (const target of targets) {
+    try {
+      await cancelScheduledNotificationAsync(target.identifier);
+    } catch {
+      failedIds.add(target.identifier);
+    }
+  }
+
+  const after = await listScheduledLocalNotifications(accountId);
+  if (after.listFailed) {
+    result.listFailed = true;
+    result.failed = result.attempted;
+    result.cancelled = 0;
+    result.remainingCurrent = result.attempted;
+    return result;
+  }
+
+  const remaining = after.items.filter((item) => {
+    if (item.owner !== 'current_account') return false;
+    if (!allowed) return true;
+    return item.kind != null && allowed.has(item.kind as AppLocalNotificationKind);
+  });
+  remaining.forEach((item) => failedIds.add(item.identifier));
+
+  result.remainingCurrent = remaining.length;
+  result.failed = failedIds.size;
+  result.cancelled = Math.max(0, result.attempted - remaining.length);
+  return result;
+}
+
+export async function cancelScheduledNotificationsByIdentifiers(
+  identifiers: string[],
+): Promise<{ cancelled: number; failed: number; remainingIds: string[] }> {
+  const unique = [...new Set(identifiers.filter(Boolean))];
+  if (unique.length === 0 || Platform.OS === 'web') {
+    return { cancelled: 0, failed: 0, remainingIds: [] };
+  }
+
+  const failed = new Set<string>();
+  for (const identifier of unique) {
+    try {
+      await cancelScheduledNotificationAsync(identifier);
+    } catch {
+      failed.add(identifier);
+    }
+  }
+
+  const after = await listScheduledLocalNotifications();
+  if (after.listFailed) {
+    return { cancelled: 0, failed: unique.length, remainingIds: unique };
+  }
+  const remainingIds = unique.filter(
+    (identifier) => failed.has(identifier) || after.items.some((item) => item.identifier === identifier),
+  );
+  return {
+    cancelled: unique.length - remainingIds.length,
+    failed: remainingIds.length,
+    remainingIds,
+  };
 }

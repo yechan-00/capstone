@@ -64,7 +64,7 @@ export function StoryPreventionSection() {
           ) : null}
 
           <RevealSection delay={60}>
-            <PhoneFrame screen="notification" size="hero" rotate={0} />
+            <PhoneFrame screen="notification" size="hero" rotate={0} lightBezel />
           </RevealSection>
 
           {!isMobile ? (

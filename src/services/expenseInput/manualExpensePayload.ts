@@ -1,11 +1,16 @@
 import type { Expense, ExpenseCategory, ExpenseMood, ExpenseSourceType } from '@/lib/types';
 
+function stripUndefinedFields<T extends Record<string, unknown>>(value: T): T {
+  const entries = Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined);
+  return Object.fromEntries(entries) as T;
+}
+
 export type ManualExpenseFormInput = {
   amount: number;
   category: ExpenseCategory;
   item: string;
   reason: string;
-  mood: ExpenseMood;
+  mood?: ExpenseMood;
   tags: string[];
   spentAt: Date;
   sourceType: ExpenseSourceType;
@@ -13,6 +18,7 @@ export type ManualExpenseFormInput = {
   summaryLine?: string;
   summaryEmoji?: string;
   imageUrl?: string | null;
+  imageUrls?: string[];
 };
 
 /**
@@ -24,7 +30,7 @@ export function buildManualExpensePayload(input: ManualExpenseFormInput): Omit<
   'id' | 'accountId' | 'userId' | 'createdAt' | 'updatedAt'
 > {
   const item = input.item.trim();
-  return {
+  return stripUndefinedFields({
     amount: input.amount,
     category: input.category,
     item: item || undefined,
@@ -38,5 +44,6 @@ export function buildManualExpensePayload(input: ManualExpenseFormInput): Omit<
     summaryLine: input.summaryLine?.trim() || undefined,
     summaryEmoji: input.summaryEmoji?.trim() || undefined,
     imageUrl: input.imageUrl ?? null,
-  };
+    imageUrls: input.imageUrls,
+  });
 }

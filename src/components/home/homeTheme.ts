@@ -1,9 +1,9 @@
 export const HOME = {
-  green: '#34C36F',
-  greenDark: '#2AAD5C',
-  greenLight: '#E8F8EE',
-  lime: '#E8F8EE',
-  brand: '#34C36F',
+  green: '#34785F',
+  greenDark: '#28624D',
+  greenLight: '#EAF5EE',
+  lime: '#EAF5EE',
+  brand: '#34785F',
   coral: '#E57373',
   body: '#64748B',
   dark: '#111827',
@@ -21,12 +21,12 @@ export const HOME = {
   textMuted: '#6B7280',
   /** @deprecated use brand */
   navy: '#111827',
-  primary: '#34C36F',
-  accentGreen: '#34C36F',
+  primary: '#34785F',
+  accentGreen: '#34785F',
   accentOrange: '#E57373',
   accentPurple: '#E57373',
-  accentCyan: '#E8F8EE',
-  accentMint: '#E8F8EE',
+  accentCyan: '#EAF5EE',
+  accentMint: '#EAF5EE',
   accentBlue: '#111827',
   maxWidth: 1180,
   headerHeight: 72,
@@ -38,7 +38,7 @@ export const HOME_GRADIENT = {
   hero: ['#FFFFFF', '#F5F7F4'] as const,
   limeBlob: 'rgba(52,195,111,0.12)',
   coralBlob: 'rgba(229,115,115,0.1)',
-  accentText: ['#34C36F', '#2AAD5C', '#34C36F'] as const,
+  accentText: ['#34785F', '#28624D', '#34785F'] as const,
 } as const;
 
 export const HOME_FEATURES = [
@@ -105,7 +105,7 @@ export const HOME_COPY = {
   insightTitle: '내 소비에도\n패턴이 있습니다.',
   insightTitleAccent: '패턴',
   insightSectionIndex: '04',
-  insightSectionLabel: '패턴 분석',
+  insightSectionLabel: '소비 패턴 분석',
   insightSub: '반복되는 후회를 발견합니다.',
   insightBody:
     '요일, 시간, 감정 데이터를 바탕으로\n야식과 배달이 반복되는 순간을 찾아냅니다.',
@@ -193,14 +193,14 @@ export const RECORD_FEATURE_CHIPS = [
   {
     icon: 'edit-note',
     title: '이유 기록',
-    desc: '소비 순간의 맥락을 기록해요',
+    desc: '지출의 맥락을 이해해요',
     bg: HOME.greenLight,
     color: HOME.green,
   },
   {
     icon: 'bar-chart',
     title: '패턴 분석',
-    desc: '나만의 인사이트를 발견해요',
+    desc: '나만의 인사이트를 얻어요',
     bg: '#E3F2FD',
     color: '#42A5F5',
   },
@@ -259,7 +259,7 @@ export const HOME_FLOATING_CARDS = [
 ] as const;
 
 export const RECORD_TAG_CHIPS = [
-  { label: '스트레스', icon: 'park', bg: '#E8F8EE', color: '#34C36F' },
+  { label: '스트레스', icon: 'park', bg: '#EAF5EE', color: '#34785F' },
   { label: '보상', icon: 'card-giftcard', bg: '#E8F5E9', color: '#66BB6A' },
   { label: '야식', icon: 'nightlight-round', bg: '#E3F2FD', color: '#42A5F5' },
   { label: '데이트', icon: 'favorite', bg: '#F3E5F5', color: '#AB47BC' },

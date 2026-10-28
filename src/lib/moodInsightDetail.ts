@@ -103,7 +103,7 @@ export function buildMoodInsightDetail(
 ): MoodInsightDetail {
   const moodLabel = moodInsightBucketLabel(bucketKey);
   const moodIncludesLabel = moodInsightBucketIncludesLabel(bucketKey);
-  const moodExpenses = expenses.filter((e) => expenseMoodInBucket(e.mood, bucketKey));
+  const moodExpenses = expenses.filter((e) => e.mood && expenseMoodInBucket(e.mood, bucketKey));
   return buildMoodInsightDetailCore(bucketKey, moodLabel, moodIncludesLabel, moodExpenses, reviews);
 }
 
@@ -362,7 +362,7 @@ export function buildMoodInsightSummaries(expenses: Expense[], reviews: Review[]
   }
 
   const rows = EXPENSE_MOOD_OPTIONS.map((option) => {
-    const moodExpenses = expenses.filter((e) => normalizeExpenseMood(e.mood) === option.key);
+    const moodExpenses = expenses.filter((e) => e.mood && normalizeExpenseMood(e.mood) === option.key);
     const totalCount = moodExpenses.length;
     const regretCount = moodExpenses.filter((e) => regretByExpenseId.has(e.id)).length;
     const regretRate = totalCount > 0 ? (regretCount / totalCount) * 100 : 0;
@@ -389,7 +389,7 @@ export function buildMoodInsightDetailForMood(
   reviews: Review[],
 ): MoodInsightDetail {
   const option = EXPENSE_MOOD_OPTIONS.find((m) => m.key === moodKey);
-  const moodExpenses = expenses.filter((e) => normalizeExpenseMood(e.mood) === moodKey);
+  const moodExpenses = expenses.filter((e) => e.mood && normalizeExpenseMood(e.mood) === moodKey);
   return buildMoodInsightDetailCore(
     moodKey,
     option?.label ?? moodKey,

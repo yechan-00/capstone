@@ -1,12 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
-  Modal, View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Pressable,
+  Alert,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useTheme } from '@/theme/ThemeContext';
 import { CATEGORIES, CategoryKey } from '@/lib/expenseOptions';
-import { ColorPickerModal } from '@/components/ColorPickerModal';
+import { BRAND_GREEN, BRAND_GREEN_DARK, BRAND_GREEN_LIGHT, useTheme } from '@/theme/ThemeContext';
 
 export interface QuickPreset {
   id: string;
@@ -18,208 +23,356 @@ export interface QuickPreset {
 }
 
 const DEFAULT_COLOR = '#94A3B8';
+const LABEL_MAX = 10;
+const ITEM_MAX = 30;
 
-interface Props {
-  visible: boolean;
+export type QuickPresetFormHandle = {
+  requestLeave: (destination: 'list' | 'dismiss') => void;
+  isDirty: () => boolean;
+};
+
+type Props = {
   preset?: QuickPreset | null;
-  onClose: () => void;
+  onBack: () => void;
+  onDismissSheet: () => void;
   onSave: (preset: QuickPreset) => void;
+  scrollMaxHeight?: number;
+};
+
+function digitsOnly(value: string): string {
+  return value.replace(/[^0-9]/g, '');
 }
 
-export function QuickPresetModal({ visible, preset, onClose, onSave }: Props) {
+function formatGrouped(digits: string): string {
+  if (!digits) return '';
+  return Number(digits).toLocaleString('ko-KR');
+}
+
+export const QuickPresetForm = forwardRef<QuickPresetFormHandle, Props>(function QuickPresetForm(
+  { preset, onBack, onDismissSheet, onSave, scrollMaxHeight },
+  ref,
+) {
   const { colors, isDark } = useTheme();
+  const isEdit = Boolean(preset?.id);
+
   const [label, setLabel] = useState('');
-  const [amountText, setAmountText] = useState('');
+  const [amountDigits, setAmountDigits] = useState('');
   const [category, setCategory] = useState<CategoryKey>('takeout');
   const [item, setItem] = useState('');
-  const [selectedColor, setSelectedColor] = useState(DEFAULT_COLOR);
-  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [focused, setFocused] = useState<'label' | 'amount' | 'item' | null>(null);
+  const [nameError, setNameError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const resetFromPreset = useCallback((next: QuickPreset | null | undefined) => {
+    setLabel(next?.label ?? '');
+    setAmountDigits(next?.amount ? String(next.amount) : '');
+    setCategory(next?.category ?? 'takeout');
+    setItem(next?.item ?? '');
+    setNameError(false);
+    setSubmitting(false);
+  }, []);
 
   useEffect(() => {
-    if (visible) {
-      setLabel(preset?.label ?? '');
-      setAmountText(preset?.amount ? String(preset.amount) : '');
-      setCategory(preset?.category ?? 'takeout');
-      setItem(preset?.item ?? '');
-      setSelectedColor(preset?.color ?? DEFAULT_COLOR);
+    resetFromPreset(preset);
+  }, [preset, resetFromPreset]);
+
+  const isDirty = useCallback(() => {
+    if (isEdit && preset) {
+      const originalAmount = preset.amount ? String(preset.amount) : '';
+      return (
+        label !== (preset.label ?? '')
+        || amountDigits !== originalAmount
+        || category !== preset.category
+        || item !== (preset.item ?? '')
+      );
     }
-  }, [visible, preset]);
+    return label.trim() !== '' || amountDigits !== '' || item.trim() !== '' || category !== 'takeout';
+  }, [amountDigits, category, isEdit, item, label, preset]);
+
+  const leaveTo = useCallback((destination: 'list' | 'dismiss') => {
+    Keyboard.dismiss();
+    if (destination === 'list') onBack();
+    else onDismissSheet();
+  }, [onBack, onDismissSheet]);
+
+  const requestLeave = useCallback((destination: 'list' | 'dismiss') => {
+    if (!isDirty()) {
+      leaveTo(destination);
+      return;
+    }
+    Alert.alert(
+      '변경사항을 버릴까요?',
+      '저장하지 않은 내용은 사라집니다.',
+      [
+        { text: '계속 편집', style: 'cancel' },
+        { text: '나가기', style: 'destructive', onPress: () => leaveTo(destination) },
+      ],
+    );
+  }, [isDirty, leaveTo]);
+
+  useImperativeHandle(ref, () => ({ requestLeave, isDirty }), [isDirty, requestLeave]);
 
   const handleSave = () => {
-    if (!label.trim()) return;
+    if (submitting) return;
+    if (!label.trim()) {
+      setNameError(true);
+      return;
+    }
+    setSubmitting(true);
     onSave({
       id: preset?.id ?? `preset_${Date.now()}`,
       label: label.trim(),
-      amount: Number(amountText.replace(/[^0-9]/g, '')) || 0,
+      amount: Number(amountDigits) || 0,
       category,
       item: item.trim(),
-      color: selectedColor,
+      color: preset?.color ?? DEFAULT_COLOR,
     });
-    onClose();
   };
 
-  const isDefaultColor = selectedColor === DEFAULT_COLOR;
+  const inputBg = isDark ? colors.inputBg : colors.surfaceMuted;
+  const idleBorder = colors.borderInput;
+  const focusBorder = BRAND_GREEN;
+  const amountText = useMemo(() => formatGrouped(amountDigits), [amountDigits]);
+
+  const fieldBorder = (key: 'label' | 'amount' | 'item', error?: boolean) => ({
+    backgroundColor: inputBg,
+    borderColor: focused === key ? focusBorder : (error ? colors.logoutText : idleBorder),
+  });
 
   return (
-    <>
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={onClose} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.kavWrap}>
-          <View style={[s.sheet, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-            <Text style={[s.title, { color: colors.text }]}>{preset ? '프리셋 편집' : '빠른 입력 추가'}</Text>
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => requestLeave('list')}
+          style={styles.backHit}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="목록으로"
+        >
+          <MaterialIcons name="chevron-left" size={24} color={colors.text} />
+        </Pressable>
+        <View style={styles.headerCopy}>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {isEdit ? '빠른 입력 수정' : '빠른 입력 추가'}
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.textSec }]}>
+            {isEdit ? '저장된 빠른 입력 정보를 수정해요.' : '자주 기록하는 소비를 등록해요.'}
+          </Text>
+        </View>
+      </View>
 
-            {/* 버튼 이름 */}
-            <Text style={[s.label, { color: colors.textMuted }]}>버튼 이름 *</Text>
+      <ScrollView
+        style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.formScroll}
+      >
+        <View style={styles.fieldBlock}>
+          <Text style={[styles.label, { color: colors.textMuted }]}>이름 *</Text>
+          <View style={[styles.fieldBox, fieldBorder('label', nameError)]}>
             <TextInput
-              style={[s.input, { borderColor: colors.borderInput, backgroundColor: colors.inputBg, color: colors.text }]}
-              placeholder="예: 아메리카노, 점심 배달"
+              style={[styles.fieldInput, { color: colors.text }]}
+              placeholder="예: 아메리카노"
               placeholderTextColor={colors.placeholder}
               value={label}
-              onChangeText={setLabel}
-              maxLength={10}
+              onChangeText={(value) => {
+                setLabel(value);
+                if (nameError && value.trim()) setNameError(false);
+              }}
+              onFocus={() => setFocused('label')}
+              onBlur={() => setFocused(null)}
+              maxLength={LABEL_MAX}
+              returnKeyType="next"
+              multiline={false}
+              underlineColorAndroid="transparent"
+              accessibilityLabel="이름"
+              accessibilityHint="필수 항목"
             />
+          </View>
+          {nameError ? (
+            <Text style={[styles.errorText, { color: colors.logoutText }]}>이름을 입력하세요</Text>
+          ) : null}
+        </View>
 
-            {/* 금액 */}
-            <Text style={[s.label, { color: colors.textMuted }]}>금액 (선택)</Text>
+        <View style={styles.fieldBlock}>
+          <Text style={[styles.label, { color: colors.textMuted }]}>금액 (선택)</Text>
+          <View style={[styles.fieldBox, fieldBorder('amount')]}>
             <TextInput
-              style={[s.input, { borderColor: colors.borderInput, backgroundColor: colors.inputBg, color: colors.text }]}
+              style={[styles.fieldInput, styles.amountInput, { color: colors.text }]}
               placeholder="0"
               placeholderTextColor={colors.placeholder}
               value={amountText}
-              onChangeText={(t) => setAmountText(t.replace(/[^0-9]/g, ''))}
+              onChangeText={(value) => setAmountDigits(digitsOnly(value))}
+              onFocus={() => setFocused('amount')}
+              onBlur={() => setFocused(null)}
               keyboardType="number-pad"
+              returnKeyType="done"
+              multiline={false}
+              underlineColorAndroid="transparent"
+              accessibilityLabel="금액"
             />
+            <Text style={[styles.won, { color: colors.textSec }]}>원</Text>
+          </View>
+        </View>
 
-            {/* 카테고리 */}
-            <Text style={[s.label, { color: colors.textMuted }]}>카테고리</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {CATEGORIES.map((cat) => {
-                  const active = category === cat.key;
-                  return (
-                    <TouchableOpacity
-                      key={cat.key}
-                      style={[s.catChip, { borderColor: colors.border, backgroundColor: colors.surfaceMuted },
-                        active && { backgroundColor: colors.accentCta, borderColor: colors.accentCta }]}
-                      onPress={() => setCategory(cat.key as CategoryKey)}
-                    >
-                      <Text style={[s.catChipText, { color: colors.text }, active && { color: '#fff', fontWeight: '800' }]}>
-                        {cat.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
+        <View style={styles.fieldBlock}>
+          <Text style={[styles.label, { color: colors.textMuted }]}>카테고리</Text>
+          <View style={styles.chipRow}>
+            {CATEGORIES.map((cat) => {
+              const active = category === cat.key;
+              return (
+                <Pressable
+                  key={cat.key}
+                  onPress={() => setCategory(cat.key)}
+                  style={[
+                    styles.catChip,
+                    {
+                      backgroundColor: active
+                        ? (isDark ? colors.choiceActiveBg : BRAND_GREEN_LIGHT)
+                        : (isDark ? colors.surfaceMuted : colors.surface),
+                      borderColor: active ? BRAND_GREEN : colors.border,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={cat.label}
+                >
+                  <Text style={styles.catEmoji} accessible={false}>{cat.emoji}</Text>
+                  <Text
+                    style={[
+                      styles.catChipText,
+                      { color: active ? (isDark ? colors.text : BRAND_GREEN_DARK) : colors.text },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {cat.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
-            {/* 품목 */}
-            <Text style={[s.label, { color: colors.textMuted }]}>품목 (선택)</Text>
+        <View style={styles.fieldBlock}>
+          <Text style={[styles.label, { color: colors.textMuted }]}>품목 (선택)</Text>
+          <View style={[styles.fieldBox, fieldBorder('item')]}>
             <TextInput
-              style={[s.input, { borderColor: colors.borderInput, backgroundColor: colors.inputBg, color: colors.text }]}
-              placeholder="예: 아이스 아메리카노"
+              style={[styles.fieldInput, { color: colors.text }]}
+              placeholder="예: 후라이드 치킨"
               placeholderTextColor={colors.placeholder}
               value={item}
               onChangeText={setItem}
-              maxLength={30}
+              onFocus={() => setFocused('item')}
+              onBlur={() => setFocused(null)}
+              maxLength={ITEM_MAX}
+              returnKeyType="done"
+              multiline={false}
+              underlineColorAndroid="transparent"
+              accessibilityLabel="품목"
             />
-
-            {/* 버튼 색상 */}
-            <Text style={[s.label, { color: colors.textMuted }]}>버튼 색상</Text>
-            <View style={s.colorRow}>
-              {/* 미리보기 원 */}
-              <View style={[s.previewBtn, { backgroundColor: selectedColor }]}>
-                <Text style={[s.previewLabel, { color: isDefaultColor ? colors.text : '#fff' }]} numberOfLines={1}>
-                  {label || '미리보기'}
-                </Text>
-              </View>
-              {/* 색상 선택 버튼 */}
-              <Pressable
-                style={[s.colorPickerBtn, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
-                onPress={() => setShowColorPicker(true)}
-              >
-                <View style={[s.colorDot, { backgroundColor: selectedColor }]} />
-                <Text style={[s.colorPickerBtnText, { color: colors.textSec }]}>
-                  {selectedColor.toUpperCase()}
-                </Text>
-                <MaterialIcons name="colorize" size={16} color={colors.textMuted} />
-              </Pressable>
-              {/* 기본으로 리셋 */}
-              {!isDefaultColor && (
-                <Pressable
-                  style={[s.resetBtn, { borderColor: colors.border }]}
-                  onPress={() => setSelectedColor(DEFAULT_COLOR)}
-                >
-                  <MaterialIcons name="refresh" size={16} color={colors.textMuted} />
-                </Pressable>
-              )}
-            </View>
-
-            {/* 저장/취소 */}
-            <View style={s.btnRow}>
-              <TouchableOpacity style={[s.cancelBtn, { borderColor: colors.border }]} onPress={onClose}>
-                <Text style={[s.cancelBtnText, { color: colors.textSec }]}>취소</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.saveBtn, { backgroundColor: colors.accentCta }, !label.trim() && { opacity: 0.4 }]}
-                onPress={handleSave}
-                disabled={!label.trim()}
-              >
-                <Text style={s.saveBtnText}>저장</Text>
-              </TouchableOpacity>
-            </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
+      </ScrollView>
 
-        {/* 컬러피커 — Modal 내부에서 렌더링해야 최상위 레이어에 올라옴 */}
-        <ColorPickerModal
-          visible={showColorPicker}
-          initialColor={selectedColor}
-          onClose={() => setShowColorPicker(false)}
-          onSelect={(hex) => setSelectedColor(hex)}
-          isDark={isDark}
-        />
-      </Modal>
-    </>
+      <Pressable
+        style={[
+          styles.saveBtn,
+          { backgroundColor: BRAND_GREEN, opacity: !label.trim() || submitting ? 0.45 : 1 },
+        ]}
+        onPress={handleSave}
+        disabled={submitting}
+        accessibilityRole="button"
+        accessibilityLabel={isEdit ? '변경사항 저장' : '빠른 입력 등록'}
+        accessibilityState={{ disabled: submitting }}
+      >
+        <Text style={styles.saveBtnText}>{isEdit ? '변경사항 저장' : '빠른 입력 등록'}</Text>
+      </Pressable>
+    </View>
   );
-}
+});
 
-const s = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
-  kavWrap: { flex: 1, justifyContent: 'flex-end' },
-  sheet: {
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    borderTopWidth: 1, padding: 24, paddingBottom: 36, gap: 4,
+/** @deprecated 시트 내부 폼으로 대체됨. 타입 호환용 별칭 */
+export const QuickPresetModal = QuickPresetForm;
+
+const styles = StyleSheet.create({
+  root: { width: '100%' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 26,
   },
-  title: { fontSize: 18, fontWeight: '900', marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '700', marginBottom: 6, marginTop: 4 },
-  input: {
-    height: 48, borderRadius: 12, borderWidth: 1.5,
-    paddingHorizontal: 14, fontSize: 15, marginBottom: 4,
+  backHit: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -10,
   },
-  catChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5 },
-  catChipText: { fontSize: 13, fontWeight: '600' },
-  colorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  previewBtn: {
-    width: 52, height: 52, borderRadius: 26,
-    alignItems: 'center', justifyContent: 'center',
+  headerCopy: { flex: 1, minWidth: 0 },
+  title: { fontSize: 21, fontWeight: '700', letterSpacing: -0.3 },
+  subtitle: { marginTop: 6, fontSize: 13.5, fontWeight: '500', lineHeight: 18 },
+  formScroll: { width: '100%', paddingBottom: 4 },
+  fieldBlock: { width: '100%', marginBottom: 22 },
+  label: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  fieldBox: {
+    width: '100%',
+    height: 54,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  previewLabel: { fontSize: 10, fontWeight: '700', textAlign: 'center', paddingHorizontal: 4 },
-  colorPickerBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5,
+  fieldInput: {
+    flex: 1,
+    margin: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    fontSize: 16,
+    fontWeight: '500',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
-  colorDot: { width: 20, height: 20, borderRadius: 10 },
-  colorPickerBtnText: { flex: 1, fontSize: 13, fontWeight: '700' },
-  resetBtn: {
-    width: 40, height: 40, borderRadius: 12, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center',
+  amountInput: {
+    paddingRight: 8,
+    fontWeight: '600',
   },
-  btnRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelBtn: {
-    flex: 1, height: 50, borderRadius: 14, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center',
+  won: { fontSize: 15, fontWeight: '600' },
+  errorText: { marginTop: 6, fontSize: 12.5, fontWeight: '600' },
+  chipRow: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
   },
-  cancelBtnText: { fontSize: 15, fontWeight: '700' },
-  saveBtn: { flex: 2, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  saveBtnText: { fontSize: 15, fontWeight: '900', color: '#fff' },
+  catChip: {
+    flex: 1,
+    minWidth: 0,
+    height: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  catEmoji: { fontSize: 15 },
+  catChipText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  saveBtn: {
+    width: '100%',
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 });

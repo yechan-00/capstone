@@ -2,11 +2,38 @@ import { EXPENSE_MOOD_OPTIONS } from './expenseMood';
 
 export type CategoryKey = 'takeout' | 'cafe' | 'delivery';
 
-export const CATEGORIES: { key: CategoryKey; label: string; emoji: string }[] = [
+export type CategoryDisplay = { key: CategoryKey; label: string; emoji: string };
+
+export const CATEGORIES: CategoryDisplay[] = [
   { key: 'takeout', label: '외식(포장)', emoji: '🥡' },
   { key: 'cafe', label: '카페', emoji: '☕️' },
   { key: 'delivery', label: '배달', emoji: '🛵' },
 ];
+
+const CATEGORY_BY_KEY = new Map<string, CategoryDisplay>(
+  CATEGORIES.map((category) => [category.key, category]),
+);
+
+/**
+ * 화면 표시용. Firestore 값은 바꾸지 않는다.
+ * food는 레거시 takeout. 알 수 없는 값은 takeout으로 바꾸지 않는다.
+ */
+export function categoryDisplay(category: string | null | undefined): CategoryDisplay | null {
+  if (!category) return null;
+  const key = category === 'food' ? 'takeout' : category;
+  return CATEGORY_BY_KEY.get(key) ?? null;
+}
+
+export function categoryLabel(category: string | null | undefined): string {
+  const display = categoryDisplay(category);
+  if (display) return display.label;
+  const raw = category?.trim();
+  return raw || '기타';
+}
+
+export function categoryEmoji(category: string | null | undefined): string {
+  return categoryDisplay(category)?.emoji ?? '';
+}
 
 /** 지출 추가 등 선택 UI에만 노출. 키만 추가하면 확장 가능. */
 export const CATEGORY_KEYS_SHOWN_IN_PICKER: readonly CategoryKey[] = [
