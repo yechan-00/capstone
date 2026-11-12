@@ -4,7 +4,7 @@ import { Redirect } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function IndexRedirect() {
-  const { user, loading } = useAuth();
+  const { loading, isRegistered } = useAuth();
 
   if (loading) {
     return (
@@ -15,10 +15,10 @@ export default function IndexRedirect() {
   }
 
   if (Platform.OS === 'web') {
-    if (user) return <Redirect href="/(tabs)" />;
+    if (isRegistered) return <Redirect href="/(tabs)" />;
     return <Redirect href="/home" />;
   }
 
-  if (user) return <Redirect href="/(tabs)" />;
+  if (isRegistered) return <Redirect href="/(tabs)" />;
   return <Redirect href="/(auth)/login" />;
 }

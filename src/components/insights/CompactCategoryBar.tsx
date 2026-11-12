@@ -2,19 +2,20 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { INSIGHTS_CATEGORY_COLORS, INSIGHTS_CATEGORY_ORDER } from '@/lib/categoryColors';
 import type { CategorySpendRow } from '@/lib/categorySpendBreakdown';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   rows: CategorySpendRow[];
 };
 
 export function CompactCategoryBar({ rows }: Props) {
+  const t = useInsightsPalette();
   const active = rows.filter((r) => r.amountKrw > 0);
   if (active.length === 0) return null;
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.track}>
+      <View style={[styles.track, { backgroundColor: t.chartGrid }]}>
         {active.map((row) => (
           <View
             key={row.key}
@@ -44,7 +45,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 999,
     overflow: 'hidden',
-    backgroundColor: INSIGHTS_THEME.chartGrid,
   },
   segment: {
     height: '100%',

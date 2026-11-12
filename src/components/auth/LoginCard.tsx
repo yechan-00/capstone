@@ -1,6 +1,5 @@
 import React, { useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   StyleSheet,
@@ -20,12 +19,10 @@ export type LoginCardProps = {
   password: string;
   showPw: boolean;
   loading: boolean;
-  guestLoading: boolean;
   onEmailChange: (v: string) => void;
   onPasswordChange: (v: string) => void;
   onToggleShowPw: () => void;
   onLogin: () => void;
-  onGuest: () => void;
   onSignup: () => void;
   onForgotPassword: () => void;
 };
@@ -74,22 +71,19 @@ export function LoginCard({
   password,
   showPw,
   loading,
-  guestLoading,
   onEmailChange,
   onPasswordChange,
   onToggleShowPw,
   onLogin,
-  onGuest,
   onSignup,
   onForgotPassword,
 }: LoginCardProps) {
   const { colors, isDark } = useTheme();
   const passwordRef = useRef<TextInput>(null);
   const [emailFocused, setEmailFocused] = useState(false);
-  const [guestHovered, setGuestHovered] = useState(false);
   const isWeb = Platform.OS === 'web';
   const noTranslateProps = isWeb ? ({ className: 'notranslate', translate: 'no' } as object) : {};
-  const busy = loading || guestLoading;
+  const busy = loading;
 
   const inputBg = colors.surface;
   const inputBorder = colors.borderInput;
@@ -164,54 +158,12 @@ export function LoginCard({
         <AuthSubmitButton
           label={loading ? '로그인 중...' : '로그인'}
           loading={loading}
-          disabled={guestLoading}
           onPress={onLogin}
           usePressable
           style={styles.primaryBtn}
           textStyle={styles.primaryBtnText}
           spinnerColor={LOGIN_UI.buttonText}
         />
-
-        <View style={styles.dividerRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-          <Text style={[styles.dividerText, { color: colors.textMuted }]}>또는</Text>
-          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-        </View>
-
-        <Pressable
-          onPress={onGuest}
-          disabled={busy}
-          onHoverIn={isWeb && !busy ? () => setGuestHovered(true) : undefined}
-          onHoverOut={isWeb ? () => setGuestHovered(false) : undefined}
-          style={({ pressed }) => [
-            styles.guestBtn,
-            {
-              backgroundColor: colors.surface,
-              borderColor: isDark ? colors.border : LOGIN_UI.guestBorder,
-            },
-            guestHovered && !busy && {
-              backgroundColor: isDark ? colors.surfaceMuted : LOGIN_UI.guestHoverBg,
-            },
-            busy && styles.guestBtnDisabled,
-            !busy && pressed && { opacity: 0.88 },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="먼저 체험해보기"
-          accessibilityState={{ busy: guestLoading, disabled: busy }}
-        >
-          {guestLoading ? (
-            <ActivityIndicator color={LOGIN_UI.guestText} />
-          ) : (
-            <Text
-              style={[
-                styles.guestBtnText,
-                { color: isDark ? '#D5E8DE' : LOGIN_UI.guestText },
-              ]}
-            >
-              먼저 체험해보기
-            </Text>
-          )}
-        </Pressable>
 
         <View style={styles.links}>
           <AuthTextLink
@@ -291,32 +243,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: LOGIN_UI.buttonText,
   },
-  dividerRow: {
-    marginTop: 22,
-    marginBottom: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    fontSize: 12,
-    fontWeight: '400',
-  },
-  guestBtn: {
-    height: LOGIN_UI.guestHeight,
-    borderRadius: LOGIN_UI.radius,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  guestBtnDisabled: { opacity: 0.55 },
-  guestBtnText: { fontSize: 16, fontWeight: '600' },
   links: {
     flexDirection: 'row',
     justifyContent: 'center',

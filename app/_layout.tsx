@@ -31,6 +31,8 @@ function AuthNavigationStack() {
       <Stack.Screen name="index" />
       <Stack.Screen name="home" />
       <Stack.Screen name="community" />
+      <Stack.Screen name="spaces" />
+      <Stack.Screen name="invite" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="expense/[id]" />

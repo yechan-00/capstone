@@ -30,7 +30,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { ErrorRetryCard } from '@/components/ErrorRetryCard';
 import { toUserMessage } from '@/utils/error';
 import { useTheme } from '@/theme/ThemeContext';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 const TAB_BAR_HEIGHT = 76;
 
@@ -38,6 +38,7 @@ export default function InsightsScreen() {
   const insets = useSafeAreaInsets();
   const { account } = useAuth();
   const { colors } = useTheme();
+  const t = useInsightsPalette();
   const [insightsWindow, setInsightsWindow] = useState(() => currentInsightsWindow('month'));
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [helpId, setHelpId] = useState<InsightHelpId | null>(null);
@@ -86,15 +87,21 @@ export default function InsightsScreen() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        container: { flex: 1, backgroundColor: INSIGHTS_THEME.bg },
-        center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+        container: { flex: 1, backgroundColor: t.bg },
+        center: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 20,
+          backgroundColor: t.bg,
+        },
         content: {
           paddingHorizontal: 20,
           paddingTop: 4,
           paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 24,
         },
         heroWrap: {
-          backgroundColor: INSIGHTS_THEME.mintSection,
+          backgroundColor: t.mintSection,
           marginHorizontal: -20,
           paddingHorizontal: 20,
           paddingTop: 8,
@@ -102,7 +109,7 @@ export default function InsightsScreen() {
         },
         emptyText: { color: colors.textMuted, fontSize: 15, textAlign: 'center', paddingVertical: 8 },
       }),
-    [colors.textMuted, insets.bottom],
+    [colors.textMuted, insets.bottom, t.bg, t.mintSection],
   );
 
   useFocusEffect(
@@ -181,7 +188,7 @@ export default function InsightsScreen() {
           />
         </View>
 
-        <InsightsSection title="소비 요약" backgroundTint={INSIGHTS_THEME.mintSection}>
+        <InsightsSection title="소비 요약" backgroundTint={t.mintSection}>
           <SpendingSummaryCard
             totalSpendKrw={insights.totalSpendKrw}
             categoryInsights={insights.categoryInsights}
@@ -208,7 +215,7 @@ export default function InsightsScreen() {
           />
         </InsightsSection>
 
-        <InsightsSection title="더 알아보기" backgroundTint={INSIGHTS_THEME.bg}>
+        <InsightsSection title="더 알아보기" backgroundTint={t.bg}>
           <ExploreMoreSection>
             <ExploreMoreRow
               icon="pie-chart"

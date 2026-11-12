@@ -178,25 +178,23 @@ export function regretCardTitle(
 }
 
 export function regretComparisonLabel(window: InsightsWindow): string {
-  return window.mode === 'year' ? '지난해보다' : '지난달보다';
+  return window.mode === 'year' ? '전년' : '지난달';
 }
 
-export function formatRegretDeltaPp(deltaPp: number): string {
-  const abs = Math.abs(deltaPp);
-  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(1);
-  if (deltaPp < 0) return `↓ ${formatted}%p`;
-  if (deltaPp > 0) return `↑ ${formatted}%p`;
-  return '변화 없음';
+function formatDeltaAbsPp(deltaPp: number): string {
+  return Math.abs(deltaPp).toFixed(1);
 }
 
-export function regretComparisonSentence(
-  window: InsightsWindow,
-  deltaPp: number,
-): string {
-  const abs = Math.abs(deltaPp);
-  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(1);
-  const prefix = regretComparisonLabel(window);
-  if (deltaPp < 0) return `${prefix} ${formatted}%p 낮아요`;
-  if (deltaPp > 0) return `${prefix} ${formatted}%p 높아요`;
-  return `${prefix} 변화 없어요`;
+/** 후회율 카드 한 줄 캡션. 화살표와 문장을 중복하지 않는다. */
+export function formatRegretDeltaCaption(window: InsightsWindow, deltaPp: number): string {
+  const vs = regretComparisonLabel(window);
+  if (deltaPp < 0) return `↓ ${formatDeltaAbsPp(deltaPp)}%p ${vs} 대비 감소`;
+  if (deltaPp > 0) return `↑ ${formatDeltaAbsPp(deltaPp)}%p ${vs} 대비 증가`;
+  return `— 0%p ${vs}과 동일`;
+}
+
+export function regretComparisonEmptyMessage(window: InsightsWindow): string {
+  return window.mode === 'year'
+    ? '비교할 전년 데이터가 없어요'
+    : '비교할 지난달 데이터가 없어요';
 }

@@ -19,11 +19,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/theme/ThemeContext';
-import { NAVY_PRESET, isCustomHex } from '@/theme/ThemeContext';
+import { isCustomHex } from '@/theme/ThemeContext';
 import { ColorPickerModal } from '@/components/ColorPickerModal';
 import { useDebouncedEffect } from '@/hooks/useDebouncedEffect';
 import { SettingsCard } from '@/components/SettingsCard';
 import { SettingsRow } from '@/components/SettingsRow';
+import { ProfileSettingsRow } from '@/components/ProfileSettingsRow';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { CenterNoticeModal } from '@/components/CenterNoticeModal';
 import { ShareNotificationsModal } from '@/components/ShareNotificationsModal';
@@ -62,7 +63,7 @@ function parseReminderTimeToDate(time: string): Date {
 export default function SettingsScreen() {
   const router = useRouter();
   const isFocusedRef = useRef(false);
-  const { user, account, logout, updateReviewReminderSettings, updateRegretPatternAlertSettings, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings, isGuest } = useAuth();
+  const { user, account, logout, updateReviewReminderSettings, updateRegretPatternAlertSettings, updateMonthlyIncome, updateFoodBudget, updateBudgetPeriodSettings } = useAuth();
   const { colors, isDark, setDarkMode, accentKey, setAccentKey, customPresets, addCustomPreset, removeCustomPreset, animationsEnabled, setAnimationsEnabled } = useTheme();
   const [timeValue, setTimeValue] = useState<Date>(() => parseReminderTimeToDate(DEFAULT_REVIEW_REMINDER_TIME));
   const [reviewReminderEnabled, setReviewReminderEnabled] = useState(true);
@@ -116,7 +117,7 @@ export default function SettingsScreen() {
     React.useCallback(() => {
       isFocusedRef.current = true;
       void getNotificationPermissionKind();
-      if (user?.uid && !isGuest) {
+      if (user?.uid) {
         void userNotificationService
           .countUnread(user.uid)
           .then(setShareUnreadCount)
@@ -130,7 +131,7 @@ export default function SettingsScreen() {
       return () => {
         isFocusedRef.current = false;
       };
-    }, [isGuest, user?.uid]),
+    }, [user?.uid]),
   );
 
   useEffect(() => {
@@ -640,35 +641,6 @@ export default function SettingsScreen() {
         },
         directBtnPreview: { width: 24, height: 24, borderRadius: 12 },
         directBtnText: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.textSec },
-        guestBanner: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          backgroundColor: '#FFF3CD',
-          borderRadius: 14,
-          padding: 14,
-          borderWidth: 1,
-          borderColor: '#FFE69C',
-          marginBottom: 4,
-        },
-        guestBannerText: {
-          flex: 1,
-          fontSize: 13,
-          fontWeight: '600',
-          color: '#856404',
-          lineHeight: 19,
-        },
-        guestSignupBtn: {
-          backgroundColor: '#856404',
-          borderRadius: 10,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-        },
-        guestSignupBtnText: {
-          fontSize: 12,
-          fontWeight: '800',
-          color: '#fff',
-        },
         logoutButton: {
           height: 52,
           borderRadius: 16,
@@ -776,12 +748,7 @@ export default function SettingsScreen() {
       keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
     >
         <SettingsCard title="계정">
-          <SettingsRow
-            icon="person-outline"
-            title="닉네임"
-            subtitle={(account?.nickname ?? '').trim() || '미설정'}
-            onPress={() => router.push('/settings/change-nickname')}
-          />
+          <ProfileSettingsRow onPress={() => router.push('/settings/change-nickname')} />
           <SettingsRow
             icon="person-outline"
             title="이메일"
@@ -1203,22 +1170,6 @@ export default function SettingsScreen() {
             last
           />
         </SettingsCard>
-
-        {/* 게스트 배너 */}
-      {isGuest && (
-        <View style={styles.guestBanner}>
-          <MaterialIcons name="person-outline" size={20} color="#856404" />
-          <Text style={styles.guestBannerText}>
-            게스트 모드예요. 앱 삭제 시 데이터가 사라져요. 회원가입하면 영구 보관돼요!
-          </Text>
-          <TouchableOpacity
-            style={styles.guestSignupBtn}
-            onPress={() => router.push('/(auth)/signup')}
-          >
-            <Text style={styles.guestSignupBtnText}>회원가입</Text>
-          </TouchableOpacity>
-        </View>
-      )}
 
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.88}>
           <MaterialIcons name="logout" size={20} color={colors.logoutText} />

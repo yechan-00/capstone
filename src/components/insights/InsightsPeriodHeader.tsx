@@ -8,7 +8,7 @@ import {
   formatPeriodNavLabel,
   shiftInsightsWindow,
 } from '@/lib/insightsPeriodNav';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 import { InsightsPeriodPickerSheet } from '@/components/insights/InsightsPeriodPickerSheet';
 
 type Props = {
@@ -28,6 +28,7 @@ export function InsightsPeriodHeader({
   periodEnd,
   onChangeWindow,
 }: Props) {
+  const t = useInsightsPalette();
   const [pickerOpen, setPickerOpen] = useState(false);
   const isMonthMode = insightsWindow.mode === 'month';
 
@@ -46,22 +47,26 @@ export function InsightsPeriodHeader({
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.segment}>
+      <View style={[styles.segment, { backgroundColor: t.surface, borderColor: t.border }]}>
         <Pressable
-          style={[styles.segmentBtn, isMonthMode && styles.segmentBtnActive]}
+          style={[styles.segmentBtn, isMonthMode && { backgroundColor: t.mintSoft }]}
           onPress={() => setMode('month')}
           accessibilityRole="button"
           accessibilityState={{ selected: isMonthMode }}
         >
-          <Text style={[styles.segmentText, isMonthMode && styles.segmentTextActive]}>월간</Text>
+          <Text style={[styles.segmentText, { color: isMonthMode ? t.primaryDeep : t.textMuted }, isMonthMode && styles.segmentTextActive]}>
+            월간
+          </Text>
         </Pressable>
         <Pressable
-          style={[styles.segmentBtn, !isMonthMode && styles.segmentBtnActive]}
+          style={[styles.segmentBtn, !isMonthMode && { backgroundColor: t.mintSoft }]}
           onPress={() => setMode('year')}
           accessibilityRole="button"
           accessibilityState={{ selected: !isMonthMode }}
         >
-          <Text style={[styles.segmentText, !isMonthMode && styles.segmentTextActive]}>연간</Text>
+          <Text style={[styles.segmentText, { color: !isMonthMode ? t.primaryDeep : t.textMuted }, !isMonthMode && styles.segmentTextActive]}>
+            연간
+          </Text>
         </Pressable>
       </View>
 
@@ -75,7 +80,7 @@ export function InsightsPeriodHeader({
           <MaterialIcons
             name="chevron-left"
             size={26}
-            color={canGoPrev ? INSIGHTS_THEME.textSecondary : INSIGHTS_THEME.textMuted}
+            color={canGoPrev ? t.textSecondary : t.textMuted}
           />
         </Pressable>
 
@@ -85,7 +90,7 @@ export function InsightsPeriodHeader({
           accessibilityRole="button"
           accessibilityLabel="기간 선택"
         >
-          <Text style={styles.navLabel}>{formatPeriodNavLabel(insightsWindow)}</Text>
+          <Text style={[styles.navLabel, { color: t.text }]}>{formatPeriodNavLabel(insightsWindow)}</Text>
         </Pressable>
 
         <Pressable
@@ -97,13 +102,13 @@ export function InsightsPeriodHeader({
           <MaterialIcons
             name="chevron-right"
             size={26}
-            color={canGoNext ? INSIGHTS_THEME.textSecondary : INSIGHTS_THEME.textMuted}
+            color={canGoNext ? t.textSecondary : t.textMuted}
           />
         </Pressable>
       </View>
 
       {isPaydayInsights && isMonthMode && periodStart && periodEnd ? (
-        <Text style={styles.paydayHint}>
+        <Text style={[styles.paydayHint, { color: t.textMuted }]}>
           식비 주기 {formatShortBudgetPeriodRange(periodStart, periodEnd)}
         </Text>
       ) : null}
@@ -129,11 +134,9 @@ const styles = StyleSheet.create({
   },
   segment: {
     flexDirection: 'row',
-    backgroundColor: INSIGHTS_THEME.bg,
     borderRadius: 12,
     padding: 3,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.border,
   },
   segmentBtn: {
     flex: 1,
@@ -142,16 +145,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  segmentBtnActive: {
-    backgroundColor: INSIGHTS_THEME.mintSoft,
-  },
   segmentText: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   segmentTextActive: {
-    color: INSIGHTS_THEME.primaryDeep,
     fontWeight: '700',
   },
   navRow: {
@@ -178,13 +176,11 @@ const styles = StyleSheet.create({
   navLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.3,
   },
   paydayHint: {
     fontSize: 12,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     textAlign: 'center',
     marginTop: -2,
   },

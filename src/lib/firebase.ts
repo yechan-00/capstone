@@ -5,8 +5,11 @@ import {
   memoryLocalCache,
   type Firestore,
 } from "firebase/firestore";
+import { getFunctions, type Functions } from "firebase/functions";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { Platform } from "react-native";
+
+const FUNCTIONS_REGION = "asia-northeast3";
 
 function initFirestoreDb(app: FirebaseApp): Firestore {
   if (Platform.OS === "web") {
@@ -41,6 +44,7 @@ let app: FirebaseApp;
 let auth: import("@firebase/auth").Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
+let functions: Functions;
 
 if (getApps().length === 0) {
   app = initializeApp(firebaseConfig);
@@ -62,6 +66,7 @@ if (getApps().length === 0) {
 
   db = initFirestoreDb(app);
   storage = getStorage(app);
+  functions = getFunctions(app, FUNCTIONS_REGION);
 } else {
   app = getApps()[0];
   if (Platform.OS === "web") {
@@ -73,7 +78,8 @@ if (getApps().length === 0) {
   }
   db = getFirestore(app);
   storage = getStorage(app);
+  functions = getFunctions(app, FUNCTIONS_REGION);
 }
 
-export { auth, db, storage };
+export { auth, db, storage, functions };
 export default app;

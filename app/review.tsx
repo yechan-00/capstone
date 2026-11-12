@@ -351,7 +351,16 @@ export default function ReviewScreen() {
           <View style={styles.section}>
             <Text style={[styles.blockTitle, { color: colors.text }]}>아쉬웠던 점이 있나요?</Text>
             <Text style={[styles.blockDesc, { color: colors.textSec }]}>해당하는 이유를 모두 고를 수 있어요.</Text>
-            <View style={styles.chipWrap}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              directionalLockEnabled
+              bounces
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={styles.reasonChips}
+              contentContainerStyle={styles.reasonChipsContent}
+            >
               {primaryRegretReasons.map((r) => {
                 const active = reasons.includes(r.key);
                 return (
@@ -365,14 +374,23 @@ export default function ReviewScreen() {
                         borderColor: active ? mintBorder : colors.border,
                       },
                     ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: active }}
+                    accessibilityLabel={r.label}
                   >
-                    <Text style={[styles.chipText, { color: active ? mintText : colors.text }]}>{r.label}</Text>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: active ? mintText : colors.text, fontWeight: active ? '600' : '500' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {r.label}
+                    </Text>
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
             {reasons.includes('other') ? (
               <TextInput
                 value={otherReason}
@@ -530,21 +548,27 @@ const styles = StyleSheet.create({
   },
   optional: { fontSize: 12, fontWeight: '700' },
 
-  chipWrap: {
+  reasonChips: {
+    marginTop: 20,
+    marginBottom: 8,
+    flexGrow: 0,
+  },
+  reasonChipsContent: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
-    marginTop: 14,
+    paddingRight: 28,
   },
   chip: {
-    minHeight: 40,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  chipText: { fontSize: 13, fontWeight: '700' },
+  chipText: { fontSize: 14, fontWeight: '500' },
 
   textIn: {
     marginTop: 12,

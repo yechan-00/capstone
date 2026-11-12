@@ -1,4 +1,7 @@
-/** 인사이트 화면 — Green + White 시스템 */
+import { useMemo } from 'react';
+import { useTheme } from '@/theme/ThemeContext';
+
+/** 인사이트 화면 — Green + White 시스템 (라이트 기본값) */
 export const INSIGHTS_THEME = {
   bg: '#F6F9F7',
   surface: '#FFFFFF',
@@ -29,11 +32,62 @@ export const INSIGHTS_THEME = {
   heatmapPeak: '#237550',
 } as const;
 
-export function insightsCardShadow() {
+export type InsightsPalette = {
+  [K in keyof typeof INSIGHTS_THEME]: string;
+} & {
+  overlay: string;
+  isDark: boolean;
+};
+
+const LIGHT_OVERLAY = 'rgba(32, 37, 34, 0.35)';
+const DARK_OVERLAY = 'rgba(0, 0, 0, 0.55)';
+
+/** ThemeContext 기반 인사이트 팔레트. 라이트는 기존 민트 디자인을 유지한다. */
+export function useInsightsPalette(): InsightsPalette {
+  const { colors, isDark } = useTheme();
+  return useMemo(() => {
+    if (!isDark) {
+      return { ...INSIGHTS_THEME, overlay: LIGHT_OVERLAY, isDark: false };
+    }
+    return {
+      bg: colors.bg,
+      surface: colors.surface,
+      primary: colors.primary,
+      primaryDeep: colors.accentBlue,
+      heroNumber: colors.accentBlue,
+      text: colors.text,
+      textSecondary: colors.textSec,
+      textMuted: colors.textMuted,
+      link: colors.accentBlue,
+      border: colors.border,
+      heroBorder: colors.border,
+      mintFill: colors.choiceActiveBg,
+      mintSoft: colors.choiceActiveBg,
+      mintHero: colors.choiceActiveBg,
+      mintSection: colors.bg,
+      positive: INSIGHTS_THEME.positive,
+      negative: INSIGHTS_THEME.negative,
+      amber: INSIGHTS_THEME.amber,
+      mutedGreen: colors.textSec,
+      chartGrid: colors.border,
+      shadowColor: '#000000',
+      heatmapEmpty: colors.surfaceMuted,
+      heatmapZero: colors.choiceActiveBg,
+      heatmapLow: INSIGHTS_THEME.heatmapLow,
+      heatmapMid: INSIGHTS_THEME.heatmapMid,
+      heatmapHigh: INSIGHTS_THEME.heatmapHigh,
+      heatmapPeak: INSIGHTS_THEME.heatmapPeak,
+      overlay: DARK_OVERLAY,
+      isDark: true,
+    };
+  }, [colors, isDark]);
+}
+
+export function insightsCardShadow(isDark = false) {
   return {
-    shadowColor: INSIGHTS_THEME.shadowColor,
+    shadowColor: isDark ? '#000000' : INSIGHTS_THEME.shadowColor,
     shadowOffset: { width: 0, height: 4 } as const,
-    shadowOpacity: 0.05,
+    shadowOpacity: isDark ? 0.28 : 0.05,
     shadowRadius: 12,
     elevation: 2,
   };

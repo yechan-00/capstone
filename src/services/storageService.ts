@@ -14,6 +14,8 @@ import {
   prepareExpenseImageForUpload,
   type PreparedExpenseImage,
 } from '@/lib/prepareExpenseImage';
+import { parseProfileImageKey } from '@/lib/profileImage';
+import { prepareProfileImageForUpload } from '@/lib/prepareProfileImage';
 
 export class ImageUploadError extends Error {
   constructor(
@@ -458,4 +460,97 @@ export async function uploadGuestCommentImage(
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' });
   return getDownloadURL(storageRef);
+}
+
+export async function uploadProfileImage(userId: string, localUri: string): Promise<string> {
+  const apiBase = getR2ImageApiBaseUrl();
+  if (!apiBase) {
+    throw new ImageUploadError(
+      'R2 이미지 서버 주소가 설정되지 않았어요. EXPO_PUBLIC_R2_IMAGE_API_URL을 확인한 뒤 앱을 다시 시작해 주세요.',
+      'config',
+    );
+  }
+  if (isRemoteImageUrl(localUri)) {
+    throw new ImageUploadError('이미 저장된 사진은 다시 올리지 않아요.', 'read');
+  }
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== userId) {
+    throw new ImageUploadError('사진을 올리려면 다시 로그인해 주세요.', 'auth');
+  }
+
+  let prepared;
+  try {
+    prepared = await prepareProfileImageForUpload(localUri);
+  } catch (error) {
+    throw new ImageUploadError(
+      error instanceof ImageOptimizeError
+        ? error.message
+        : '사진을 최적화하지 못했어요. 다른 사진을 선택해 주세요.',
+      'read',
+    );
+  }
+
+  const { bytes } = await readLocalImage(prepared.uri);
+  const idToken = await currentUser.getIdToken();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}/v1/profile/image`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': prepared.contentType,
+      },
+      body: bytes,
+    });
+  } catch {
+    throw new ImageUploadError('사진 서버에 연결하지 못했어요. 네트워크를 확인해 주세요.', 'upload');
+  }
+
+  const payload = (await response.json().catch(() => null)) as { imageKey?: string; error?: string } | null;
+  if (response.status === 403) {
+    throw new ImageUploadError('정식 회원만 프로필 사진을 올릴 수 있어요.', 'auth', 403);
+  }
+  const mapped = parseUploadError(response, payload);
+  if (response.status === 401 || response.status === 413 || response.status === 415) {
+    throw mapped;
+  }
+  const imageKey = parseProfileImageKey(payload?.imageKey, userId)?.key;
+  if (!response.ok || !imageKey) {
+    throw mapped;
+  }
+  return imageKey;
+}
+
+export async function deleteProfileImageObject(userId: string, imageKey: string): Promise<void> {
+  const parsed = parseProfileImageKey(imageKey, userId);
+  if (!parsed) return;
+  const apiBase = getR2ImageApiBaseUrl();
+  if (!apiBase) return;
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== userId) {
+    throw new ImageUploadError('사진을 삭제하려면 다시 로그인해 주세요.', 'auth');
+  }
+  const idToken = await currentUser.getIdToken();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}/v1/profile/image`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imageKey: parsed.key }),
+    });
+  } catch {
+    throw new ImageUploadError('사진 서버에 연결하지 못했어요. 네트워크를 확인해 주세요.', 'upload');
+  }
+  if (response.status === 401) {
+    throw new ImageUploadError('로그인 정보가 만료됐어요. 다시 로그인한 뒤 시도해 주세요.', 'auth', 401);
+  }
+  if (response.status === 403) {
+    throw new ImageUploadError('이 사진은 삭제할 수 없어요.', 'auth', 403);
+  }
+  if (!response.ok) {
+    throw new ImageUploadError('프로필 사진을 정리하지 못했어요.', 'upload', response.status);
+  }
 }

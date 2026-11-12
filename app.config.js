@@ -4,7 +4,7 @@ const config = {
   slug: 'regret-wallet',
   version: '1.0.0',
   orientation: 'portrait',
-  icon: './assets/images/app-logo.png',
+  icon: './assets/images/icon.png',
   userInterfaceStyle: 'light',
   assetBundlePatterns: ['assets/**/*'],
   ios: {
@@ -13,18 +13,19 @@ const config = {
   },
   android: {
     adaptiveIcon: {
-      foregroundImage: './assets/images/app-logo.png',
-      backgroundColor: '#C9847A',
+      foregroundImage: './assets/images/adaptive-icon.png',
+      backgroundColor: '#6BA389',
     },
     package: 'com.regretwallet.app',
   },
   web: {
-    favicon: './assets/images/app-logo.png',
+    favicon: './assets/images/icon.png',
   },
   plugins: [
     [
       'expo-notifications',
       {
+        // Android status-bar small icon: monochrome white on transparent only.
         icon: './assets/notification-icon.png',
         color: '#34785F',
       },
@@ -32,7 +33,7 @@ const config = {
     [
       'expo-splash-screen',
       {
-        image: './assets/images/app-logo.png',
+        image: './assets/images/splash-icon.png',
         resizeMode: 'contain',
         backgroundColor: '#FAFCF7',
       },

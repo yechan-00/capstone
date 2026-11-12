@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +16,7 @@ import { AuthScreenBackground } from '@/components/auth/AuthScreenBackground';
 import { LOGIN_UI } from '@/components/auth/loginTheme';
 import { ForgotPasswordModal } from '@/components/auth/ForgotPasswordModal';
 import { CenterNoticeModal } from '@/components/CenterNoticeModal';
+import { LoginRequiredModal } from '@/components/LoginRequiredModal';
 import { useTheme } from '@/theme/ThemeContext';
 import { validateEmail, validatePassword } from '@/utils/validation';
 import { mapLoginAuthError, mapPasswordResetError } from '@/utils/firebaseAuthErrors';
@@ -25,24 +26,38 @@ export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { signIn, signInAsGuest } = useAuth();
+  const { signIn, isAnonymousSession } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [guestLoading, setGuestLoading] = useState(false);
   const [resetSending, setResetSending] = useState(false);
   const [forgotVisible, setForgotVisible] = useState(false);
   const [notice, setNotice] = useState<{ title?: string; message: string } | null>(null);
+  const [mergeWarningVisible, setMergeWarningVisible] = useState(false);
   const [backHovered, setBackHovered] = useState(false);
+  const mergeAckedRef = useRef(false);
   const isWeb = Platform.OS === 'web';
+  const canGoBack = router.canGoBack();
 
   const showNotice = useCallback((message: string, title?: string) => {
     setNotice({ message, title });
   }, []);
 
-  const handleLogin = useCallback(async () => {
-    if (loading || guestLoading) return;
+  const runEmailSignIn = useCallback(async () => {
+    if (loading) return;
+    try {
+      setLoading(true);
+      await signIn(email, password);
+    } catch (error: unknown) {
+      showNotice(mapLoginAuthError(error, '로그인에 실패했습니다.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [email, loading, password, showNotice, signIn]);
+
+  const handleLogin = useCallback(() => {
+    if (loading) return;
     if (!email.trim() || !password.trim()) {
       showNotice('이메일과 비밀번호를 입력해주세요.', '오류');
       return;
@@ -56,30 +71,12 @@ export default function LoginScreen() {
       showNotice(pv.message ?? '비밀번호를 확인해주세요.', '오류');
       return;
     }
-    try {
-      setLoading(true);
-      await signIn(email, password);
-      router.replace('/(tabs)');
-    } catch (error: unknown) {
-      showNotice(mapLoginAuthError(error, '로그인에 실패했습니다.'));
-    } finally {
-      setLoading(false);
+    if (isAnonymousSession && !mergeAckedRef.current) {
+      setMergeWarningVisible(true);
+      return;
     }
-  }, [email, guestLoading, loading, password, router, showNotice, signIn]);
-
-  const handleGuestLogin = useCallback(async () => {
-    if (loading || guestLoading) return;
-    try {
-      setGuestLoading(true);
-      await signInAsGuest();
-      router.replace('/(tabs)');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '게스트 로그인에 실패했습니다.';
-      showNotice(message, '오류');
-    } finally {
-      setGuestLoading(false);
-    }
-  }, [guestLoading, loading, router, showNotice, signInAsGuest]);
+    void runEmailSignIn();
+  }, [email, isAnonymousSession, loading, password, runEmailSignIn, showNotice]);
 
   const handlePasswordReset = useCallback(
     async (resetEmail: string) => {
@@ -101,7 +98,7 @@ export default function LoginScreen() {
     [showNotice],
   );
 
-  const topPad = Math.max(insets.top, 16) + (isWeb ? 56 : 20);
+  const topPad = Math.max(insets.top, 16) + (isWeb || canGoBack ? 56 : 20);
   const bottomPad = Math.max(insets.bottom, 16) + 12;
 
   return (
@@ -111,9 +108,15 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        {isWeb ? (
+        {canGoBack || isWeb ? (
           <Pressable
-            onPress={() => router.push('/home')}
+            onPress={() => {
+              if (canGoBack) {
+                router.back();
+                return;
+              }
+              router.push('/home');
+            }}
             onHoverIn={() => setBackHovered(true)}
             onHoverOut={() => setBackHovered(false)}
             style={({ pressed }) => [
@@ -121,6 +124,8 @@ export default function LoginScreen() {
               { top: Math.max(insets.top, 20) },
               pressed && { opacity: 0.75 },
             ]}
+            accessibilityRole="button"
+            accessibilityLabel={canGoBack ? '이전 화면으로' : '홈으로'}
           >
             <Text
               style={[
@@ -128,7 +133,7 @@ export default function LoginScreen() {
                 { color: backHovered ? LOGIN_UI.signupLink : colors.textSec },
               ]}
             >
-              ← 홈으로
+              {canGoBack ? '← 돌아가기' : '← 홈으로'}
             </Text>
           </Pressable>
         ) : null}
@@ -147,22 +152,52 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.formSlot}>
+            {isAnonymousSession ? (
+              <View
+                style={[
+                  styles.preserveNote,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.preserveTitle, { color: colors.text }]}>
+                  이 기기에 남은 기록이 있어요
+                </Text>
+                <Text style={[styles.preserveBody, { color: colors.textSec }]}>
+                  회원가입하면 지금 기록을 이어서 사용할 수 있어요. 다른 계정으로 로그인하면
+                  이 기록은 자동으로 합쳐지지 않아요.
+                </Text>
+              </View>
+            ) : null}
             <LoginCard
               email={email}
               password={password}
               showPw={showPw}
               loading={loading}
-              guestLoading={guestLoading}
               onEmailChange={setEmail}
               onPasswordChange={setPassword}
               onToggleShowPw={() => setShowPw((v) => !v)}
               onLogin={handleLogin}
-              onGuest={handleGuestLogin}
               onSignup={() => router.push('/(auth)/signup')}
               onForgotPassword={() => setForgotVisible(true)}
             />
           </View>
         </ScrollView>
+
+        <LoginRequiredModal
+          visible={mergeWarningVisible}
+          title="기존 기록 안내"
+          message={
+            '기존 계정으로 로그인하면 이 기기에 남아 있는 소비 기록은 자동으로 합쳐지지 않아요.\n\n현재 기록을 유지하려면 회원가입을 이용해 주세요.'
+          }
+          cancelLabel="취소"
+          confirmLabel="계속 로그인"
+          onCancel={() => setMergeWarningVisible(false)}
+          onConfirm={() => {
+            mergeAckedRef.current = true;
+            setMergeWarningVisible(false);
+            void runEmailSignIn();
+          }}
+        />
 
         <CenterNoticeModal
           visible={notice != null}
@@ -197,6 +232,23 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: LOGIN_UI.formWidth,
     alignItems: 'stretch',
+  },
+  preserveNote: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  preserveTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  preserveBody: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
   },
   backLink: {
     position: 'absolute',

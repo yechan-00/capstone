@@ -21,6 +21,101 @@ service cloud.firestore {
     function isValidUserId(userId) {
       return request.auth != null && userId == request.auth.uid;
     }
+
+    // 프라이빗 공간: 익명이 아닌 정식 회원만
+    function isRegisteredUser() {
+      return request.auth != null
+        && request.auth.uid is string
+        && request.auth.uid.size() > 0
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isSpaceMember(spaceId) {
+      return isRegisteredUser()
+        && exists(/databases/$(database)/documents/spaces/$(spaceId)/space_members/$(request.auth.uid));
+    }
+
+    function hasOpenSettlementLock(spaceId, sharedExpenseId) {
+      return exists(/databases/$(database)/documents/spaces/$(spaceId)/settlement_locks/$(sharedExpenseId))
+        && get(/databases/$(database)/documents/spaces/$(spaceId)/settlement_locks/$(sharedExpenseId)).data.status == 'open';
+    }
+
+    function isNowish(value) {
+      return value is timestamp
+        && value <= request.time + duration.time(0, 1, 0, 0)
+        && value >= request.time - duration.time(0, 1, 0, 0);
+    }
+
+    function isEventDateKey(value) {
+      return value is string
+        && value.size() == 10
+        && value.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+    }
+
+    function isEventTime(value) {
+      return value is string
+        && value.size() == 5
+        && value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+
+    function isMemoryImageKey(spaceId, memoryId, value) {
+      return value is string
+        && value.matches('^spaces/' + spaceId + '/memories/' + memoryId + '/[A-Za-z0-9_-]{1,180}\\.(jpg|png|webp|heic)$');
+    }
+
+    function memoryImageKeysValid(spaceId, memoryId, keys) {
+      return keys is list
+        && keys.size() <= 5
+        && (keys.size() < 1 || isMemoryImageKey(spaceId, memoryId, keys[0]))
+        && (keys.size() < 2 || isMemoryImageKey(spaceId, memoryId, keys[1]))
+        && (keys.size() < 3 || isMemoryImageKey(spaceId, memoryId, keys[2]))
+        && (keys.size() < 4 || isMemoryImageKey(spaceId, memoryId, keys[3]))
+        && (keys.size() < 5 || isMemoryImageKey(spaceId, memoryId, keys[4]));
+    }
+
+    function isValidSpaceMemory(spaceId, memoryId, data) {
+      return data.keys().hasOnly([
+          'title', 'content', 'dateKey', 'createdByUid', 'imageKeys',
+          'createdAt', 'updatedAt'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 60
+        && data.content is string
+        && data.content.size() <= 2000
+        && isEventDateKey(data.dateKey)
+        && data.createdByUid is string
+        && data.createdByUid.size() > 0
+        && memoryImageKeysValid(spaceId, memoryId, data.imageKeys)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSpaceEvent(data) {
+      return data.keys().hasOnly([
+          'title', 'dateKey', 'allDay', 'startTime', 'endTime',
+          'description', 'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 60
+        && isEventDateKey(data.dateKey)
+        && data.allDay is bool
+        && (
+          (data.allDay == true && data.startTime == null && data.endTime == null)
+          || (
+            data.allDay == false
+            && isEventTime(data.startTime)
+            && (data.endTime == null || (isEventTime(data.endTime) && data.endTime >= data.startTime))
+          )
+        )
+        && data.description is string
+        && data.description.size() <= 500
+        && data.createdByUid is string
+        && data.createdByUid.size() > 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
     
     // Accounts 컬렉션
     match /accounts/{accountId} {
@@ -92,6 +187,30 @@ service cloud.firestore {
                          request.resource.data.accountId == resource.data.accountId;
         
         allow delete: if isAccountMember(accountId);
+      }
+
+      // 개인 소비 → 공유 복사 연결. 작성자 본인만. 공유 문서에는 expenseId를 두지 않는다.
+      match /space_expense_links/{linkId} {
+        allow read: if isAccountOwner(accountId);
+        allow create: if isAccountOwner(accountId)
+          && request.resource.data.keys().hasOnly([
+            'spaceId', 'sharedExpenseId', 'expenseId', 'createdAt'
+          ])
+          && request.resource.data.spaceId is string
+          && request.resource.data.spaceId.size() > 0
+          && request.resource.data.spaceId.size() <= 128
+          && request.resource.data.spaceId.matches('^[A-Za-z0-9_-]+$')
+          && request.resource.data.sharedExpenseId is string
+          && request.resource.data.sharedExpenseId.size() > 0
+          && request.resource.data.sharedExpenseId.size() <= 128
+          && request.resource.data.sharedExpenseId.matches('^[A-Za-z0-9_-]+$')
+          && request.resource.data.expenseId is string
+          && request.resource.data.expenseId.size() > 0
+          && request.resource.data.expenseId.size() <= 128
+          && request.resource.data.expenseId.matches('^[A-Za-z0-9_-]+$')
+          && request.resource.data.createdAt is timestamp;
+        allow update: if false;
+        allow delete: if isAccountOwner(accountId);
       }
     }
 
@@ -221,6 +340,100 @@ service cloud.firestore {
 
         allow update, delete: if false;
       }
+    }
+
+    // 프라이빗 공유 공간 — 생성·수정·삭제는 Admin(Cloud Function)만
+    match /spaces/{spaceId} {
+      allow read: if isSpaceMember(spaceId);
+      allow create, update, delete: if false;
+
+      match /space_members/{uid} {
+        allow get: if isRegisteredUser() && request.auth.uid == uid;
+        allow list, create, update, delete: if false;
+      }
+
+      // 초대 코드 원문. 클라이언트 직접 읽기·쓰기 금지. Admin callable만.
+      match /invite_private/{docId} {
+        allow read, write: if false;
+      }
+
+      // 공유 캘린더 일정. 현재 멤버만 읽고 만들 수 있으며, 수정·삭제는 작성자만.
+      match /events/{eventId} {
+        allow read: if isSpaceMember(spaceId);
+
+        allow create: if isSpaceMember(spaceId)
+          && isValidSpaceEvent(request.resource.data)
+          && request.resource.data.createdByUid == request.auth.uid
+          && isNowish(request.resource.data.createdAt)
+          && request.resource.data.updatedAt == request.resource.data.createdAt;
+
+        allow update: if isSpaceMember(spaceId)
+          && resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && isNowish(request.resource.data.updatedAt)
+          && isValidSpaceEvent(request.resource.data);
+
+        allow delete: if isSpaceMember(spaceId)
+          && resource.data.createdByUid == request.auth.uid;
+      }
+
+      match /memories/{memoryId} {
+        allow read: if isSpaceMember(spaceId);
+
+        allow create: if isSpaceMember(spaceId)
+          && isValidSpaceMemory(spaceId, memoryId, request.resource.data)
+          && request.resource.data.createdByUid == request.auth.uid
+          && isNowish(request.resource.data.createdAt)
+          && request.resource.data.updatedAt == request.resource.data.createdAt;
+
+        allow update: if isSpaceMember(spaceId)
+          && resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && isNowish(request.resource.data.updatedAt)
+          && isValidSpaceMemory(spaceId, memoryId, request.resource.data);
+
+        allow delete: if isSpaceMember(spaceId)
+          && resource.data.createdByUid == request.auth.uid;
+      }
+
+      // 공동 소비. 생성·수정은 멤버십(최대 20명) 검증이 Rules exists() 한도를 넘으므로 Callable만.
+      // 진행 중 정산 락이 있으면 금액·참여자와 불일치가 나지 않도록 삭제를 막는다.
+      match /shared_expenses/{sharedExpenseId} {
+        allow read: if isSpaceMember(spaceId);
+        allow create, update: if false;
+        allow delete: if isSpaceMember(spaceId)
+          && resource.data.createdByUid == request.auth.uid
+          && !hasOpenSettlementLock(spaceId, sharedExpenseId);
+      }
+
+      // 정산. 금액·상태 변경은 Callable만. 현재 멤버 읽기 전용.
+      match /settlements/{settlementId} {
+        allow read: if isSpaceMember(spaceId);
+        allow create, update, delete: if false;
+      }
+
+      match /settlement_locks/{sharedExpenseId} {
+        allow read: if isSpaceMember(spaceId);
+        allow create, update, delete: if false;
+      }
+    }
+
+    // 초대 코드 검증용 해시 문서. 원문 없음. 클라이언트 직접 읽기·쓰기 금지.
+    match /space_invites/{inviteId} {
+      allow read, write: if false;
+    }
+
+    match /invite_attempts/{uid} {
+      allow read, write: if false;
+    }
+
+    // 참여 공간 목록: collectionGroup('space_members') where uid == auth.uid
+    // accounts/{id}/members 와 컬렉션 이름을 분리해 계정 멤버십과 OR되지 않게 한다.
+    match /{path=**}/space_members/{memberId} {
+      allow read: if isRegisteredUser()
+        && resource.data.uid == request.auth.uid;
     }
 
     // 앱 내 알림 (공유 코멘트 등) — Cloud Function만 생성, 사용자는 읽기·읽음 처리

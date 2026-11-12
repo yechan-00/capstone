@@ -1,12 +1,41 @@
-const { onRequest } = require('firebase-functions/v2/https');
+const { onCall, onRequest } = require('firebase-functions/v2/https');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 const { Expo } = require('expo-server-sdk');
 const { buildShareHtml } = require('./sharePageHtml');
+const { createSpaceHandler } = require('./createSpace');
+const {
+  createSpaceInviteHandler,
+  getSpaceInviteHandler,
+  rotateSpaceInviteHandler,
+  revokeSpaceInviteHandler,
+  previewSpaceInviteHandler,
+  joinSpaceByInviteHandler,
+} = require('./spaceInvites');
+const { listSpaceMembersHandler } = require('./spaceMembers');
+const { leaveSpaceHandler, removeSpaceMemberHandler } = require('./spaceMembership');
+const {
+  createSpaceSharedExpenseHandler,
+  updateSpaceSharedExpenseHandler,
+} = require('./spaceSharedExpenses');
+const {
+  createSpaceSettlementHandler,
+  updateSpaceSettlementHandler,
+  cancelSpaceSettlementHandler,
+  setSpaceSettlementTransferStatusHandler,
+} = require('./spaceSettlements');
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
+
+const INVITE_CALLABLE_OPTIONS = {
+  secrets: ['INVITE_PEPPER'],
+};
+
+const LIST_SPACE_MEMBERS_OPTIONS = {
+  secrets: ['PROFILE_IMAGE_PEPPER'],
+};
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -115,6 +144,135 @@ exports.sharePage = onRequest({ cors: false, invoker: 'public' }, async (req, re
     console.error('[sharePage]', err);
     res.status(500).send('페이지를 불러오지 못했어요.');
   }
+});
+
+/** 프라이빗 공유 공간 생성. 클라이언트 직접 쓰기는 규칙으로 금지. */
+exports.createSpace = onCall(async (request) => {
+  return createSpaceHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.createSpaceInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return createSpaceInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.getSpaceInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return getSpaceInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.rotateSpaceInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return rotateSpaceInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.revokeSpaceInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return revokeSpaceInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.previewSpaceInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return previewSpaceInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.joinSpaceByInvite = onCall(INVITE_CALLABLE_OPTIONS, async (request) => {
+  return joinSpaceByInviteHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.listSpaceMembers = onCall(LIST_SPACE_MEMBERS_OPTIONS, async (request) => {
+  return listSpaceMembersHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.leaveSpace = onCall(async (request) => {
+  return leaveSpaceHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.removeSpaceMember = onCall(async (request) => {
+  return removeSpaceMemberHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.createSpaceSharedExpense = onCall(async (request) => {
+  return createSpaceSharedExpenseHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.updateSpaceSharedExpense = onCall(async (request) => {
+  return updateSpaceSharedExpenseHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.createSpaceSettlement = onCall(async (request) => {
+  return createSpaceSettlementHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.updateSpaceSettlement = onCall(async (request) => {
+  return updateSpaceSettlementHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.cancelSpaceSettlement = onCall(async (request) => {
+  return cancelSpaceSettlementHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
+});
+
+exports.setSpaceSettlementTransferStatus = onCall(async (request) => {
+  return setSpaceSettlementTransferStatusHandler({
+    auth: request.auth,
+    data: request.data,
+    db,
+  });
 });
 
 /** 게스트 댓글 등록 시 소유자 알림 */

@@ -4,7 +4,7 @@ import {
   INSIGHTS_CATEGORY_COLORS,
   INSIGHTS_CATEGORY_LABELS,
 } from '@/lib/categoryColors';
-import { INSIGHTS_THEME, insightsCardShadow } from '@/theme/insightsTheme';
+import { insightsCardShadow, useInsightsPalette } from '@/theme/insightsTheme';
 
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 const WD_LABELS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -21,6 +21,7 @@ export function WeekdaySpendFrequencyCard({
   weekdayCategoryCounts,
   embedded = false,
 }: Props) {
+  const t = useInsightsPalette();
   const wd = weekdayExpenseCounts ?? [0, 0, 0, 0, 0, 0, 0];
   const wdCat = weekdayCategoryCounts ?? Array.from({ length: 7 }, () => ({}));
   const wdMax = useMemo(() => Math.max(1, ...WD_ORDER.map((d) => wd[d] ?? 0)), [wd]);
@@ -28,11 +29,18 @@ export function WeekdaySpendFrequencyCard({
   const hasData = WD_ORDER.some((d) => (wd[d] ?? 0) > 0);
 
   return (
-    <View style={[styles.card, embedded && styles.embedded]}>
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: t.surface, borderColor: t.border },
+        insightsCardShadow(t.isDark),
+        embedded && styles.embedded,
+      ]}
+    >
       {!embedded ? (
         <>
-          <Text style={styles.title}>요일별 소비</Text>
-          <Text style={styles.subtitle}>기록 건수 기준 · 요일별 소비 빈도</Text>
+          <Text style={[styles.title, { color: t.text }]}>요일별 소비</Text>
+          <Text style={[styles.subtitle, { color: t.textMuted }]}>기록 건수 기준 · 요일별 소비 빈도</Text>
         </>
       ) : null}
 
@@ -52,7 +60,7 @@ export function WeekdaySpendFrequencyCard({
 
               return (
                 <View key={dayIdx} style={styles.barCol}>
-                  <View style={styles.barTrack}>
+                  <View style={[styles.barTrack, { backgroundColor: t.chartGrid }]}>
                     <View style={{ width: '100%', height: totalH, justifyContent: 'flex-end' }}>
                       {segments.map((seg) => (
                         <View
@@ -62,7 +70,7 @@ export function WeekdaySpendFrequencyCard({
                       ))}
                     </View>
                   </View>
-                  <Text style={styles.barLabel}>{WD_LABELS[i]}</Text>
+                  <Text style={[styles.barLabel, { color: t.textMuted }]}>{WD_LABELS[i]}</Text>
                 </View>
               );
             })}
@@ -72,14 +80,14 @@ export function WeekdaySpendFrequencyCard({
             {CAT_ORDER.map((c) => (
               <View key={c} style={styles.legendItem}>
                 <View style={[styles.legendDot, { backgroundColor: INSIGHTS_CATEGORY_COLORS[c] }]} />
-                <Text style={styles.legendText}>{INSIGHTS_CATEGORY_LABELS[c]}</Text>
+                <Text style={[styles.legendText, { color: t.textMuted }]}>{INSIGHTS_CATEGORY_LABELS[c]}</Text>
               </View>
             ))}
           </View>
         </>
       ) : (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>소비 기록이 쌓이면 요일별 빈도를 확인할 수 있어요.</Text>
+          <Text style={[styles.emptyText, { color: t.textMuted }]}>소비 기록이 쌓이면 요일별 빈도를 확인할 수 있어요.</Text>
         </View>
       )}
     </View>
@@ -88,14 +96,11 @@ export function WeekdaySpendFrequencyCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.border,
     paddingHorizontal: 18,
     paddingVertical: 16,
     gap: 12,
-    ...insightsCardShadow(),
   },
   embedded: {
     shadowOpacity: 0,
@@ -107,13 +112,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.2,
   },
   subtitle: {
     fontSize: 12,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     marginTop: -4,
   },
   barRow: {
@@ -134,7 +137,6 @@ const styles = StyleSheet.create({
     height: 72,
     justifyContent: 'flex-end',
     borderRadius: 6,
-    backgroundColor: INSIGHTS_THEME.chartGrid,
     overflow: 'hidden',
   },
   barFill: {
@@ -143,7 +145,6 @@ const styles = StyleSheet.create({
   barLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: INSIGHTS_THEME.textMuted,
   },
   legendRow: {
     flexDirection: 'row',
@@ -165,7 +166,6 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 11,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   empty: {
     paddingVertical: 16,
@@ -174,7 +174,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 13,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     textAlign: 'center',
     lineHeight: 19,
   },

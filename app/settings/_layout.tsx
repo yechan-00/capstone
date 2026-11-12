@@ -15,7 +15,7 @@ export default function SettingsStackLayout() {
         headerBackTitle: '설정',
       }}
     >
-      <Stack.Screen name="change-nickname" options={{ title: '닉네임 변경' }} />
+      <Stack.Screen name="change-nickname" options={{ title: '프로필 편집' }} />
       <Stack.Screen name="change-email" options={{ title: '이메일 변경' }} />
       <Stack.Screen name="change-password" options={{ title: '비밀번호 변경' }} />
     </Stack>

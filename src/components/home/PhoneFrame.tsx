@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Image, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { HOME } from '@/components/home/homeTheme';
 import { getScreenshot, type ScreenshotKey } from '@/components/home/screenshotAssets';
 import {

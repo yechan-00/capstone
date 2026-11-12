@@ -13,7 +13,7 @@ import {
   WEEKDAY_DISPLAY_ORDER,
   weekdayLabel,
 } from '@/lib/timePatternInsight';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   cells: WeekdayTimeCell[];
@@ -21,6 +21,7 @@ type Props = {
 };
 
 export function RegretPatternHeatmap({ cells, onCellPress }: Props) {
+  const t = useInsightsPalette();
   const grid = useMemo(() => buildHeatmapGrid(cells), [cells]);
   const peak = useMemo(() => findPeakHeatmapCell(cells), [cells]);
 
@@ -29,7 +30,7 @@ export function RegretPatternHeatmap({ cells, onCellPress }: Props) {
       <View style={styles.headerRow}>
         <View style={styles.timeCol} />
         {WEEKDAY_DISPLAY_ORDER.map((weekday) => (
-          <Text key={weekday} style={styles.weekdayLabel}>
+          <Text key={weekday} style={[styles.weekdayLabel, { color: t.textMuted }]}>
             {weekdayLabel(weekday)}
           </Text>
         ))}
@@ -39,7 +40,7 @@ export function RegretPatternHeatmap({ cells, onCellPress }: Props) {
         const timeOfDay = TIME_OF_DAY_ORDER[rowIdx]!;
         return (
           <View key={timeOfDay} style={styles.row}>
-            <Text style={styles.timeLabel}>{TIME_OF_DAY_LABELS[timeOfDay]}</Text>
+            <Text style={[styles.timeLabel, { color: t.textMuted }]}>{TIME_OF_DAY_LABELS[timeOfDay]}</Text>
             {row.map((cell) => {
               const key = `${cell.weekday}:${cell.timeOfDay}`;
               const isPeak =
@@ -47,13 +48,19 @@ export function RegretPatternHeatmap({ cells, onCellPress }: Props) {
                 peak.weekday === cell.weekday &&
                 peak.timeOfDay === cell.timeOfDay &&
                 cell.regretCount > 0;
-              const color = regretHeatmapCellColor(cell, isPeak);
+              const color = regretHeatmapCellColor(cell, isPeak, t);
 
               return (
                 <Pressable
                   key={key}
                   onPress={() => onCellPress?.(cell)}
-                  style={[styles.cell, { backgroundColor: color }]}
+                  style={[
+                    styles.cell,
+                    {
+                      backgroundColor: color,
+                      borderColor: t.isDark ? t.border : 'rgba(255,255,255,0.65)',
+                    },
+                  ]}
                   accessibilityRole="button"
                   accessibilityLabel={cellAccessibilityLabel(cell)}
                 />
@@ -64,15 +71,15 @@ export function RegretPatternHeatmap({ cells, onCellPress }: Props) {
       })}
 
       <View style={styles.legendRow}>
-        <Text style={styles.legendLabel}>적음</Text>
+        <Text style={[styles.legendLabel, { color: t.textMuted }]}>적음</Text>
         <View style={styles.legendGradient}>
-          <View style={[styles.legendStep, { backgroundColor: INSIGHTS_THEME.heatmapZero }]} />
-          <View style={[styles.legendStep, { backgroundColor: INSIGHTS_THEME.heatmapLow }]} />
-          <View style={[styles.legendStep, { backgroundColor: INSIGHTS_THEME.heatmapMid }]} />
-          <View style={[styles.legendStep, { backgroundColor: INSIGHTS_THEME.heatmapHigh }]} />
-          <View style={[styles.legendStep, { backgroundColor: INSIGHTS_THEME.heatmapPeak }]} />
+          <View style={[styles.legendStep, { backgroundColor: t.heatmapZero }]} />
+          <View style={[styles.legendStep, { backgroundColor: t.heatmapLow }]} />
+          <View style={[styles.legendStep, { backgroundColor: t.heatmapMid }]} />
+          <View style={[styles.legendStep, { backgroundColor: t.heatmapHigh }]} />
+          <View style={[styles.legendStep, { backgroundColor: t.heatmapPeak }]} />
         </View>
-        <Text style={styles.legendLabel}>많음</Text>
+        <Text style={[styles.legendLabel, { color: t.textMuted }]}>많음</Text>
       </View>
     </View>
   );
@@ -92,7 +99,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 11,
     fontWeight: '700',
-    color: INSIGHTS_THEME.textMuted,
   },
   row: {
     flexDirection: 'row',
@@ -103,7 +109,6 @@ const styles = StyleSheet.create({
     width: 30,
     fontSize: 11,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   cell: {
     flex: 1,
@@ -111,7 +116,7 @@ const styles = StyleSheet.create({
     maxHeight: 28,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.65)',
+    borderColor: 'transparent',
   },
   legendRow: {
     flexDirection: 'row',
@@ -123,7 +128,6 @@ const styles = StyleSheet.create({
   legendLabel: {
     fontSize: 10,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   legendGradient: {
     flexDirection: 'row',

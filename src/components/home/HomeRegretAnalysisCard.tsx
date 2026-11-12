@@ -17,20 +17,12 @@ type Props = {
   reviewCount: number;
 };
 
-function formatDelta(deltaPp: number): string {
+function formatHomeDeltaCaption(deltaPp: number): string {
   const value = Math.abs(deltaPp);
   const amount = value % 1 === 0 ? value.toFixed(0) : value.toFixed(1);
-  if (deltaPp < 0) return `지난달보다 ${amount}%p 개선됐어요`;
-  if (deltaPp > 0) return `지난달보다 ${amount}%p 높아졌어요`;
-  return '지난달과 같은 수준이에요';
-}
-
-function statusCopy(rate: number | null, improved: boolean, worsened: boolean): string {
-  if (rate === null) return '아직 평가 기록 없음';
-  if (rate === 0) return '후회한 기록 없음';
-  if (improved) return '지난달보다 후회 감소';
-  if (worsened) return '지난달보다 후회 증가';
-  return '이번 달 소비 후회율';
+  if (deltaPp < 0) return `↓ 지난달보다 ${amount}%p 감소`;
+  if (deltaPp > 0) return `↑ 지난달보다 ${amount}%p 증가`;
+  return '— 지난달과 동일';
 }
 
 export function HomeRegretAnalysisCard({
@@ -93,14 +85,6 @@ export function HomeRegretAnalysisCard({
           >
             {formatRegretRateLabel(rate)}
           </Text>
-          <Text style={[styles.headline, { color: colors.text }]} numberOfLines={2}>
-            {statusCopy(rate, improved, worsened)}
-          </Text>
-          {deltaPp !== null ? (
-            <Text style={[styles.comparison, { color: colors.textMuted }]} numberOfLines={2}>
-              {formatDelta(deltaPp)}
-            </Text>
-          ) : null}
         </Pressable>
 
         <View
@@ -131,6 +115,17 @@ export function HomeRegretAnalysisCard({
           </Text>
         </View>
       </View>
+
+      <Text
+        style={[
+          styles.caption,
+          {
+            color: improved ? colors.primary : worsened ? colors.errorText : colors.textMuted,
+          },
+        ]}
+      >
+        {deltaPp !== null ? formatHomeDeltaCaption(deltaPp) : '지난달 비교 데이터 없음'}
+      </Text>
 
       <View style={[styles.footer, { borderTopColor: colors.border }]}>
         <Text style={[styles.footerText, { color: colors.text }]}>후회 {regretCount}건</Text>
@@ -189,8 +184,12 @@ const styles = StyleSheet.create({
     letterSpacing: -1.4,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
-  headline: { marginTop: 2, fontSize: 13, lineHeight: 18, fontWeight: '700' },
-  comparison: { marginTop: 4, fontSize: 10, lineHeight: 13, fontWeight: '600' },
+  caption: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
   trendCol: {
     flexGrow: 1,
     flexShrink: 1,

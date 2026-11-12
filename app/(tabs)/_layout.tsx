@@ -171,7 +171,7 @@ function TabsNavigator() {
   const headerTitleColor = isDark ? colors.headerTint : colors.text;
   const { count: pendingReviewCount } = usePendingReviewCount();
 
-  const { account, user, loading: authLoading } = useAuth();
+  const { account, loading: authLoading, isRegistered } = useAuth();
   const { createExpense } = useExpenses();
   const [showQuickSheet, setShowQuickSheet] = useState(false);
   const [quickPresets, setQuickPresets] = useState<QuickPreset[]>([]);
@@ -179,10 +179,10 @@ function TabsNavigator() {
   const persistAllowedRef = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (!authLoading && !isRegistered) {
       router.replace(Platform.OS === 'web' ? '/home' : '/(auth)/login');
     }
-  }, [authLoading, router, user]);
+  }, [authLoading, isRegistered, router]);
 
   const reviewTabBadge =
     pendingReviewCount > 0 ? (pendingReviewCount > 99 ? '99+' : pendingReviewCount) : undefined;

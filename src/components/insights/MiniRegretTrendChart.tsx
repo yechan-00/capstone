@@ -1,7 +1,7 @@
 import React, { useId, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { INSIGHTS_THEME, useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   rates: Array<number | null> | null;
@@ -82,6 +82,7 @@ export function MiniRegretTrendChart({
   yScale = 'fit',
   fillTopOpacity = 0.14,
 }: Props) {
+  const t = useInsightsPalette();
   const reactId = useId();
   const gradientId = `regretTrendFill-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const geom = useMemo(
@@ -96,8 +97,8 @@ export function MiniRegretTrendChart({
       return (
         <View style={[styles.empty, { width, height }]}>
           <Text
-            style={[styles.emptyText, emptyMessageColor ? { color: emptyMessageColor } : null]}
-            numberOfLines={2}
+            style={[styles.emptyText, { color: emptyMessageColor ?? t.textMuted }]}
+            numberOfLines={3}
           >
             {emptyMessage}
           </Text>
@@ -107,7 +108,7 @@ export function MiniRegretTrendChart({
     if (!showEmptyPlaceholder) return null;
     return (
       <View style={[styles.placeholder, { width, height }]}>
-        <View style={styles.decorLine} />
+        <View style={[styles.decorLine, { backgroundColor: t.primary }]} />
       </View>
     );
   }
@@ -162,7 +163,6 @@ const styles = StyleSheet.create({
   decorLine: {
     height: 2,
     borderRadius: 1,
-    backgroundColor: INSIGHTS_THEME.primary,
     opacity: 0.35,
     marginHorizontal: 4,
   },
@@ -176,6 +176,5 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     fontWeight: '600',
     textAlign: 'center',
-    color: INSIGHTS_THEME.textMuted,
   },
 });

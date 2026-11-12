@@ -8,7 +8,7 @@ import { BudgetDetailSheet } from '@/components/insights/BudgetDetailSheet';
 import { buildCategorySpendBreakdown } from '@/lib/categorySpendBreakdown';
 import { budgetRatioColor } from '@/lib/insightsBudgetColors';
 import type { CategoryInsight, FoodBudgetInsight, IncomeInsight } from '@/lib/types';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   totalSpendKrw: number;
@@ -37,6 +37,7 @@ export function SpendingSummaryCard({
   periodEnd,
   periodMode,
 }: Props) {
+  const t = useInsightsPalette();
   const router = useRouter();
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [budgetKind, setBudgetKind] = useState<'food' | 'income' | null>(null);
@@ -51,15 +52,15 @@ export function SpendingSummaryCard({
   const foodBarPct = foodBudget
     ? Math.min(100, Math.max(0, foodBudget.spendRatioPercent))
     : 0;
-  const foodBarColor = foodBudget ? budgetRatioColor(foodBudget.spendRatioPercent) : INSIGHTS_THEME.primary;
+  const foodBarColor = foodBudget ? budgetRatioColor(foodBudget.spendRatioPercent) : t.primary;
 
   return (
     <>
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.border }]}>
         {hasSpend ? (
           <>
-            <Text style={styles.amount}>{formatWon(totalSpendKrw)}</Text>
-            <Text style={styles.amountCaption}>이번 기간 소비</Text>
+            <Text style={[styles.amount, { color: t.text }]}>{formatWon(totalSpendKrw)}</Text>
+            <Text style={[styles.amountCaption, { color: t.textMuted }]}>이번 기간 소비</Text>
 
             {foodBudget ? (
               <Pressable
@@ -69,12 +70,12 @@ export function SpendingSummaryCard({
                 accessibilityLabel="식비 예산 상세"
               >
                 <View style={styles.metricHead}>
-                  <Text style={styles.metricLabel}>식비 예산</Text>
+                  <Text style={[styles.metricLabel, { color: t.textSecondary }]}>식비 예산</Text>
                   <Text style={[styles.metricPct, { color: foodBarColor }]}>
                     {foodBudget.spendRatioPercent.toFixed(0)}%
                   </Text>
                 </View>
-                <View style={styles.barTrack}>
+                <View style={[styles.barTrack, { backgroundColor: t.chartGrid }]}>
                   <View style={[styles.barFill, { width: `${foodBarPct}%`, backgroundColor: foodBarColor }]} />
                 </View>
               </Pressable>
@@ -84,8 +85,8 @@ export function SpendingSummaryCard({
                 onPress={() => router.push('/(tabs)/settings')}
                 accessibilityRole="button"
               >
-                <Text style={styles.setupText}>식비 예산 설정하기</Text>
-                <MaterialIcons name="chevron-right" size={18} color={INSIGHTS_THEME.link} />
+                <Text style={[styles.setupText, { color: t.link }]}>식비 예산 설정하기</Text>
+                <MaterialIcons name="chevron-right" size={18} color={t.link} />
               </Pressable>
             ) : null}
 
@@ -96,8 +97,8 @@ export function SpendingSummaryCard({
                 accessibilityRole="button"
                 accessibilityLabel="월 수입 대비 소비 상세"
               >
-                <Text style={styles.metricLabel}>월 수입 대비</Text>
-                <Text style={styles.metricPctPlain}>{income.spendRatioPercent.toFixed(0)}%</Text>
+                <Text style={[styles.metricLabel, { color: t.textSecondary }]}>월 수입 대비</Text>
+                <Text style={[styles.metricPctPlain, { color: t.text }]}>{income.spendRatioPercent.toFixed(0)}%</Text>
               </Pressable>
             ) : !hasMonthlyIncome ? (
               <Pressable
@@ -105,15 +106,15 @@ export function SpendingSummaryCard({
                 onPress={() => router.push('/(tabs)/settings')}
                 accessibilityRole="button"
               >
-                <Text style={styles.setupText}>월 수입 설정하기</Text>
-                <MaterialIcons name="chevron-right" size={18} color={INSIGHTS_THEME.link} />
+                <Text style={[styles.setupText, { color: t.link }]}>월 수입 설정하기</Text>
+                <MaterialIcons name="chevron-right" size={18} color={t.link} />
               </Pressable>
             ) : null}
 
             {topCategory ? (
               <View style={styles.categoryBlock}>
                 <CompactCategoryBar rows={breakdown.rows} />
-                <Text style={styles.topCategory}>
+                <Text style={[styles.topCategory, { color: t.textSecondary }]}>
                   {topCategory.label} · {formatWon(topCategory.amountKrw)} · {topCategory.pct.toFixed(0)}%
                 </Text>
               </View>
@@ -124,12 +125,12 @@ export function SpendingSummaryCard({
               style={styles.linkBtn}
               accessibilityRole="button"
             >
-              <Text style={styles.linkText}>카테고리 보기</Text>
-              <MaterialIcons name="chevron-right" size={18} color={INSIGHTS_THEME.link} />
+              <Text style={[styles.linkText, { color: t.link }]}>카테고리 보기</Text>
+              <MaterialIcons name="chevron-right" size={18} color={t.link} />
             </Pressable>
           </>
         ) : (
-          <Text style={styles.empty}>아직 소비 기록이 없어요.</Text>
+          <Text style={[styles.empty, { color: t.textMuted }]}>아직 소비 기록이 없어요.</Text>
         )}
       </View>
 
@@ -156,10 +157,8 @@ export function SpendingSummaryCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.border,
     paddingHorizontal: 22,
     paddingVertical: 20,
     gap: 16,
@@ -167,14 +166,12 @@ const styles = StyleSheet.create({
   amount: {
     fontSize: 30,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.8,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   amountCaption: {
     fontSize: 13,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     marginTop: -8,
   },
   metricBlock: { gap: 8 },
@@ -192,7 +189,6 @@ const styles = StyleSheet.create({
   metricLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
   },
   metricPct: {
     fontSize: 16,
@@ -201,12 +197,10 @@ const styles = StyleSheet.create({
   metricPctPlain: {
     fontSize: 16,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
   },
   barTrack: {
     height: 6,
     borderRadius: 999,
-    backgroundColor: INSIGHTS_THEME.chartGrid,
     overflow: 'hidden',
   },
   barFill: {
@@ -217,7 +211,6 @@ const styles = StyleSheet.create({
   topCategory: {
     fontSize: 13,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
   },
   linkBtn: {
     flexDirection: 'row',
@@ -229,7 +222,6 @@ const styles = StyleSheet.create({
   linkText: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.link,
   },
   setupRow: {
     flexDirection: 'row',
@@ -240,12 +232,10 @@ const styles = StyleSheet.create({
   setupText: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.link,
   },
   empty: {
     fontSize: 14,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     textAlign: 'center',
     paddingVertical: 12,
   },

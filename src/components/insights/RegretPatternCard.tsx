@@ -11,7 +11,7 @@ import {
   findPeakHeatmapCell,
   hasAnyHeatmapData,
 } from '@/lib/regretHeatmap';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   weekdayTimeInsights: WeekdayTimeCell[];
@@ -28,6 +28,7 @@ export function RegretPatternCard({
   account,
   onHelpPress,
 }: Props) {
+  const t = useInsightsPalette();
   const [detailOpen, setDetailOpen] = useState(false);
   const [cellDetail, setCellDetail] = useState<WeekdayTimeCell | null>(null);
 
@@ -38,20 +39,20 @@ export function RegretPatternCard({
 
   return (
     <>
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.border }]}>
         <View style={styles.header}>
           {onHelpPress ? (
             <Pressable onPress={onHelpPress} hitSlop={8} style={styles.helpBtn} accessibilityLabel="설명">
-              <MaterialIcons name="help-outline" size={18} color={INSIGHTS_THEME.textMuted} />
+              <MaterialIcons name="help-outline" size={18} color={t.textMuted} />
             </Pressable>
           ) : null}
         </View>
 
         {hasData && patternHero ? (
           <View style={styles.hero}>
-            <Text style={styles.heroDayTime}>{patternHero.dayTime}</Text>
-            <Text style={styles.heroSubtitle}>{patternHero.subtitle}</Text>
-            <Text style={styles.heroRate}>후회율 {patternHero.rate.toFixed(0)}%</Text>
+            <Text style={[styles.heroDayTime, { color: t.heroNumber }]}>{patternHero.dayTime}</Text>
+            <Text style={[styles.heroSubtitle, { color: t.textSecondary }]}>{patternHero.subtitle}</Text>
+            <Text style={[styles.heroRate, { color: t.primaryDeep }]}>후회율 {patternHero.rate.toFixed(0)}%</Text>
           </View>
         ) : null}
 
@@ -63,7 +64,7 @@ export function RegretPatternCard({
             />
 
             {alertStatus ? (
-              <Text style={styles.alertHint}>사전 알림 사용 중</Text>
+              <Text style={[styles.alertHint, { color: t.mutedGreen }]}>사전 알림 사용 중</Text>
             ) : null}
 
             <Pressable
@@ -71,13 +72,13 @@ export function RegretPatternCard({
               style={styles.linkBtn}
               accessibilityRole="button"
             >
-              <Text style={styles.linkText}>패턴 자세히 보기</Text>
-              <MaterialIcons name="chevron-right" size={18} color={INSIGHTS_THEME.link} />
+              <Text style={[styles.linkText, { color: t.link }]}>패턴 자세히 보기</Text>
+              <MaterialIcons name="chevron-right" size={18} color={t.link} />
             </Pressable>
           </>
         ) : (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>리뷰가 더 쌓이면 반복 패턴을 확인할 수 있어요.</Text>
+            <Text style={[styles.emptyText, { color: t.textMuted }]}>리뷰가 더 쌓이면 반복 패턴을 확인할 수 있어요.</Text>
           </View>
         )}
       </View>
@@ -101,10 +102,8 @@ export function RegretPatternCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.border,
     paddingHorizontal: 20,
     paddingVertical: 20,
     gap: 14,
@@ -122,25 +121,21 @@ const styles = StyleSheet.create({
   heroDayTime: {
     fontSize: 22,
     fontWeight: '800',
-    color: INSIGHTS_THEME.heroNumber,
     letterSpacing: -0.5,
   },
   heroSubtitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
     lineHeight: 20,
   },
   heroRate: {
     fontSize: 16,
     fontWeight: '700',
-    color: INSIGHTS_THEME.primaryDeep,
     marginTop: 4,
   },
   alertHint: {
     fontSize: 12,
     fontWeight: '600',
-    color: INSIGHTS_THEME.mutedGreen,
     textAlign: 'center',
   },
   linkBtn: {
@@ -153,7 +148,6 @@ const styles = StyleSheet.create({
   linkText: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.link,
   },
   empty: {
     paddingVertical: 16,
@@ -162,7 +156,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 13,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     textAlign: 'center',
     lineHeight: 19,
   },

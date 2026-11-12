@@ -6,11 +6,11 @@ import type { Account, Insights, InsightsWindow } from '@/lib/types';
 import { isCurrentInsightsWindow } from '@/lib/budgetPeriod';
 import { hasDisplayableRegretTrend } from '@/lib/insightsPeriodNav';
 import {
-  formatRegretDeltaPp,
+  formatRegretDeltaCaption,
   regretCardTitle,
-  regretComparisonSentence,
+  regretComparisonEmptyMessage,
 } from '@/lib/regretSummaryInsight';
-import { INSIGHTS_THEME, insightsCardShadow } from '@/theme/insightsTheme';
+import { insightsCardShadow, useInsightsPalette } from '@/theme/insightsTheme';
 import { MiniRegretTrendChart } from '@/components/insights/MiniRegretTrendChart';
 
 type Props = {
@@ -25,6 +25,7 @@ function formatKrw(n: number): string {
 }
 
 export function RegretHeroCard({ insights, insightsWindow, account, onHelpPress }: Props) {
+  const t = useInsightsPalette();
   const isCurrent = isCurrentInsightsWindow(insightsWindow, account);
   const title = regretCardTitle(insightsWindow, isCurrent);
   const hasReviews = insights.totalReviews > 0;
@@ -40,16 +41,16 @@ export function RegretHeroCard({ insights, insightsWindow, account, onHelpPress 
   const worsened = deltaPp !== null && deltaPp > 0;
 
   return (
-    <View style={[styles.outer, insightsCardShadow()]}>
+    <View style={[styles.outer, insightsCardShadow(t.isDark)]}>
       <LinearGradient
-        colors={[INSIGHTS_THEME.mintHero, INSIGHTS_THEME.surface, INSIGHTS_THEME.surface]}
+        colors={[t.mintHero, t.surface, t.surface]}
         locations={[0, 0.45, 1]}
         start={{ x: 1, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={styles.card}
+        style={[styles.card, { borderColor: t.heroBorder }]}
       >
         <View style={styles.headerRow}>
-          <Text style={styles.cardLabel}>{title}</Text>
+          <Text style={[styles.cardLabel, { color: t.text }]}>{title}</Text>
           {onHelpPress ? (
             <Pressable
               onPress={onHelpPress}
@@ -57,7 +58,7 @@ export function RegretHeroCard({ insights, insightsWindow, account, onHelpPress 
               accessibilityRole="button"
               accessibilityLabel="후회율 설명 보기"
             >
-              <MaterialIcons name="help-outline" size={18} color={INSIGHTS_THEME.textMuted} />
+              <MaterialIcons name="help-outline" size={18} color={t.textMuted} />
             </Pressable>
           ) : null}
         </View>
@@ -66,29 +67,33 @@ export function RegretHeroCard({ insights, insightsWindow, account, onHelpPress 
           <View style={styles.metricMain}>
             {!hasExpenses ? (
               <>
-                <Text style={styles.metricDash}>—</Text>
-                <Text style={styles.metricHint}>이 기간에 기록된 소비가 없어요.</Text>
+                <Text style={[styles.metricDash, { color: t.textMuted }]}>—</Text>
+                <Text style={[styles.metricHint, { color: t.textMuted }]}>이 기간에 기록된 소비가 없어요.</Text>
               </>
             ) : !hasReviews ? (
               <>
-                <Text style={styles.metricDash}>—</Text>
-                <Text style={styles.metricHint}>리뷰가 쌓이면 변화가 표시돼요.</Text>
+                <Text style={[styles.metricDash, { color: t.textMuted }]}>—</Text>
+                <Text style={[styles.metricHint, { color: t.textMuted }]}>리뷰가 쌓이면 변화가 표시돼요.</Text>
               </>
             ) : (
               <>
-                <Text style={styles.metricValue}>{insights.overallRegretRate.toFixed(0)}%</Text>
+                <Text style={[styles.metricValue, { color: t.heroNumber }]}>{insights.overallRegretRate.toFixed(0)}%</Text>
                 {canCompare && deltaPp !== null ? (
                   <Text
                     style={[
                       styles.comparison,
-                      improved && styles.comparisonGood,
-                      worsened && styles.comparisonBad,
+                      { color: t.textSecondary },
+                      improved && { color: t.positive },
+                      worsened && { color: t.negative },
                     ]}
+                    numberOfLines={2}
                   >
-                    {formatRegretDeltaPp(deltaPp)} · {regretComparisonSentence(insightsWindow, deltaPp)}
+                    {formatRegretDeltaCaption(insightsWindow, deltaPp)}
                   </Text>
                 ) : (
-                  <Text style={styles.comparisonMuted}>비교할 이전 기록이 없어요</Text>
+                  <Text style={[styles.comparisonMuted, { color: t.textMuted }]}>
+                    {regretComparisonEmptyMessage(insightsWindow)}
+                  </Text>
                 )}
               </>
             )}
@@ -97,27 +102,29 @@ export function RegretHeroCard({ insights, insightsWindow, account, onHelpPress 
           {showTrendArea ? (
             <MiniRegretTrendChart
               rates={showRealChart ? insights.regretTrendRates : null}
-              showEmptyPlaceholder={!showRealChart}
+              emptyMessage={!showRealChart ? '추이를 표시할 데이터가 부족해요' : undefined}
               width={140}
               height={72}
+              strokeColor={t.primary}
+              emptyMessageColor={t.textMuted}
             />
           ) : null}
         </View>
 
         {hasReviews ? (
           <>
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: t.border }]} />
             <View style={styles.secondaryRow}>
               <View style={styles.secondaryCol}>
-                <Text style={styles.secondaryLabel}>후회한 소비</Text>
-                <Text style={styles.secondaryValue}>{insights.totalRegrets}건</Text>
+                <Text style={[styles.secondaryLabel, { color: t.textMuted }]}>후회한 소비</Text>
+                <Text style={[styles.secondaryValue, { color: t.text }]}>{insights.totalRegrets}건</Text>
               </View>
               <View style={styles.secondaryCol}>
-                <Text style={styles.secondaryLabel}>후회 금액</Text>
-                <Text style={styles.secondaryValue}>{formatKrw(insights.regretAmountKrw)}</Text>
+                <Text style={[styles.secondaryLabel, { color: t.textMuted }]}>후회 금액</Text>
+                <Text style={[styles.secondaryValue, { color: t.text }]}>{formatKrw(insights.regretAmountKrw)}</Text>
               </View>
             </View>
-            <Text style={styles.reviewMeta}>리뷰 {insights.totalReviews}건 기준</Text>
+            <Text style={[styles.reviewMeta, { color: t.textMuted }]}>리뷰 {insights.totalReviews}건 기준</Text>
           </>
         ) : null}
       </LinearGradient>
@@ -133,7 +140,6 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.heroBorder,
     paddingHorizontal: 22,
     paddingVertical: 22,
     gap: 16,
@@ -146,7 +152,6 @@ const styles = StyleSheet.create({
   cardLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.2,
   },
   metricRow: {
@@ -166,7 +171,6 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 48,
     fontWeight: '800',
-    color: INSIGHTS_THEME.heroNumber,
     letterSpacing: -2,
     lineHeight: 52,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
@@ -174,36 +178,25 @@ const styles = StyleSheet.create({
   metricDash: {
     fontSize: 40,
     fontWeight: '700',
-    color: INSIGHTS_THEME.textMuted,
     lineHeight: 44,
   },
   metricHint: {
     fontSize: 13,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     lineHeight: 18,
   },
   comparison: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
-    lineHeight: 20,
-  },
-  comparisonGood: {
-    color: INSIGHTS_THEME.positive,
-  },
-  comparisonBad: {
-    color: INSIGHTS_THEME.negative,
+    lineHeight: 18,
   },
   comparisonMuted: {
     fontSize: 13,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     lineHeight: 18,
   },
   divider: {
     height: 1,
-    backgroundColor: INSIGHTS_THEME.border,
     opacity: 0.7,
   },
   secondaryRow: {
@@ -217,19 +210,16 @@ const styles = StyleSheet.create({
   secondaryLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   secondaryValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.3,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   reviewMeta: {
     fontSize: 12,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     marginTop: -4,
   },
 });

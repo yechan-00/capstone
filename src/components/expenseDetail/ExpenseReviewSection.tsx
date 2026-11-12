@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import type { Review, ReviewSchedule } from '@/lib/types';
 import { useExpenseDetailPalette } from '@/theme/expenseDetailTheme';
 import { regretReasonLabel } from '@/lib/regretReasons';
@@ -130,51 +131,28 @@ export function ExpenseReviewSection({ reviews, schedules, onReviewPress }: Prop
           );
         })
       ) : (
+        (state.kind === 'open' || state.kind === 'evaluable') && state.schedule && onReviewPress ? (
+          <View style={[styles.pendingCard, { backgroundColor: p.surface, borderColor: p.border }]}>
+            <Text style={[styles.pendingTitle, { color: p.text }]}>
+              아직 평가하지 않은 소비예요
+            </Text>
+            <Text style={[styles.pendingDesc, { color: p.textSec }]}>
+              평가 기간이 지나도 기록할 수 있어요
+            </Text>
+            <PrimaryButton
+              label="지금 평가하기"
+              onPress={() => onReviewPress(state.schedule!.id)}
+              style={styles.reviewBtn}
+            />
+          </View>
+        ) : (
         <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.border }]}>
-          {state.kind === 'open' && state.schedule && onReviewPress ? (
-            <>
-              <View style={[styles.badge, { backgroundColor: p.mintFill }]}>
-                <Text style={[styles.badgeText, { color: p.mintText }]}>평가 가능</Text>
-              </View>
-              <Text style={[styles.emptyTitle, { color: p.text }]}>이 소비를 돌아볼 시간이에요.</Text>
-              <Pressable
-                onPress={() => onReviewPress(state.schedule!.id)}
-                style={({ pressed }) => [
-                  styles.reviewBtn,
-                  { backgroundColor: p.mintFill, opacity: pressed ? 0.88 : 1 },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="지금 평가하기"
-              >
-                <Text style={[styles.reviewBtnText, { color: p.mintText }]}>지금 평가하기</Text>
-              </Pressable>
-            </>
-          ) : state.kind === 'evaluable' && state.schedule && onReviewPress ? (
-            <>
-              <View style={[styles.badge, { backgroundColor: p.chipBg }]}>
-                <Text style={[styles.badgeText, { color: p.chipText }]}>평가 기간 종료</Text>
-              </View>
-              <Text style={[styles.emptyTitle, { color: p.text }]}>
-                리뷰 탭 기한은 지났지만 평가는 할 수 있어요.
-              </Text>
-              <Pressable
-                onPress={() => onReviewPress(state.schedule!.id)}
-                style={({ pressed }) => [
-                  styles.reviewBtn,
-                  { backgroundColor: p.mintFill, opacity: pressed ? 0.88 : 1 },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="지금 평가하기"
-              >
-                <Text style={[styles.reviewBtnText, { color: p.mintText }]}>지금 평가하기</Text>
-              </Pressable>
-            </>
-          ) : state.kind === 'waiting' && state.schedule ? (
+          {state.kind === 'waiting' && state.schedule ? (
             <>
               <View style={[styles.badge, { backgroundColor: p.chipBg }]}>
                 <Text style={[styles.badgeText, { color: p.chipText }]}>평가 대기</Text>
               </View>
-              <Text style={[styles.emptyTitle, { color: p.text }]}>
+              <Text style={[styles.waitTitle, { color: p.text }]}>
                 조금 뒤에 이 소비를 돌아볼 수 있어요.
               </Text>
               <Text style={[styles.waitHint, { color: p.textMuted }]}>
@@ -192,6 +170,7 @@ export function ExpenseReviewSection({ reviews, schedules, onReviewPress }: Prop
             </>
           )}
         </View>
+        )
       )}
     </View>
   );
@@ -210,6 +189,13 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 10,
   },
+  pendingCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    gap: 8,
+  },
   badge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
@@ -220,7 +206,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  emptyTitle: {
+  pendingTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    lineHeight: 24,
+  },
+  pendingDesc: {
+    marginTop: -2,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
+  },
+  waitTitle: {
     fontSize: 15,
     fontWeight: '600',
     lineHeight: 22,
@@ -231,16 +229,10 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   reviewBtn: {
-    alignSelf: 'flex-start',
-    minHeight: 44,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reviewBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
+    alignSelf: 'stretch',
+    height: 48,
+    marginTop: 6,
+    borderRadius: 14,
   },
   resultCard: {
     borderRadius: 16,

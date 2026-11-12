@@ -218,7 +218,34 @@
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "read", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "memories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dateKey", "order": "DESCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shared_expenses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dateKey", "order": "DESCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "space_members",
+      "fieldPath": "uid",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type RowProps = {
   icon: React.ComponentProps<typeof MaterialIcons>['name'];
@@ -11,20 +11,25 @@ type RowProps = {
 };
 
 export function ExploreMoreRow({ icon, title, description, onPress }: RowProps) {
+  const t = useInsightsPalette();
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      style={({ pressed }) => [
+        styles.row,
+        { backgroundColor: t.surface, borderColor: t.border },
+        pressed && styles.rowPressed,
+      ]}
       accessibilityRole="button"
     >
-      <View style={styles.iconWrap}>
-        <MaterialIcons name={icon} size={20} color={INSIGHTS_THEME.primaryDeep} />
+      <View style={[styles.iconWrap, { backgroundColor: t.mintSoft }]}>
+        <MaterialIcons name={icon} size={20} color={t.primaryDeep} />
       </View>
       <View style={styles.copy}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.description}>{description}</Text>
+        <Text style={[styles.title, { color: t.text }]}>{title}</Text>
+        <Text style={[styles.description, { color: t.textMuted }]}>{description}</Text>
       </View>
-      <MaterialIcons name="chevron-right" size={20} color={INSIGHTS_THEME.textMuted} />
+      <MaterialIcons name="chevron-right" size={20} color={t.textMuted} />
     </Pressable>
   );
 }
@@ -41,10 +46,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: INSIGHTS_THEME.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: INSIGHTS_THEME.border,
     paddingHorizontal: 16,
     paddingVertical: 14,
     minHeight: 68,
@@ -56,7 +59,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: INSIGHTS_THEME.mintSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -67,12 +69,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
   },
   description: {
     fontSize: 12,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     lineHeight: 16,
   },
 });

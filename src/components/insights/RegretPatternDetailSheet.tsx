@@ -18,7 +18,7 @@ import {
   weekdayLabel,
 } from '@/lib/timePatternInsight';
 import { cellAccessibilityLabel, findPeakHeatmapCell } from '@/lib/regretHeatmap';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   visible: boolean;
@@ -35,6 +35,7 @@ export function RegretPatternDetailSheet({
   weekdayInsights,
   timeOfDayInsights,
 }: Props) {
+  const t = useInsightsPalette();
   const insets = useSafeAreaInsets();
   const peak = findPeakHeatmapCell(cells);
   const byWeekday = new Map(weekdayInsights.map((r) => [r.weekday, r]));
@@ -42,21 +43,21 @@ export function RegretPatternDetailSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="닫기" />
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <View style={styles.handle} />
-        <Text style={styles.title}>후회 패턴</Text>
-        <Text style={styles.subtitle}>후회율 = 후회 리뷰 수 ÷ 기록 건수 × 100</Text>
+      <Pressable style={[styles.backdrop, { backgroundColor: t.overlay }]} onPress={onClose} accessibilityLabel="닫기" />
+      <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.handle, { backgroundColor: t.border }]} />
+        <Text style={[styles.title, { color: t.text }]}>후회 패턴</Text>
+        <Text style={[styles.subtitle, { color: t.textMuted }]}>후회율 = 후회 리뷰 수 ÷ 기록 건수 × 100</Text>
 
         <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
           {peak ? (
-            <View style={styles.peakBox}>
-              <Text style={styles.peakTitle}>가장 높은 패턴</Text>
-              <Text style={styles.peakText}>{cellAccessibilityLabel(peak)}</Text>
+            <View style={[styles.peakBox, { backgroundColor: t.mintSoft }]}>
+              <Text style={[styles.peakTitle, { color: t.primaryDeep }]}>가장 높은 패턴</Text>
+              <Text style={[styles.peakText, { color: t.text }]}>{cellAccessibilityLabel(peak)}</Text>
             </View>
           ) : null}
 
-          <Text style={styles.sectionTitle}>요일별</Text>
+          <Text style={[styles.sectionTitle, { color: t.textSecondary }]}>요일별</Text>
           {WEEKDAY_DISPLAY_ORDER.map((weekday) => {
             const row = byWeekday.get(weekday) ?? {
               weekday,
@@ -75,7 +76,7 @@ export function RegretPatternDetailSheet({
             );
           })}
 
-          <Text style={[styles.sectionTitle, { marginTop: 12 }]}>시간대별</Text>
+          <Text style={[styles.sectionTitle, { color: t.textSecondary, marginTop: 12 }]}>시간대별</Text>
           {TIME_OF_DAY_ORDER.map((slot) => {
             const row = byTime.get(slot) ?? {
               timeOfDay: slot,
@@ -95,8 +96,8 @@ export function RegretPatternDetailSheet({
           })}
         </ScrollView>
 
-        <Pressable style={styles.closeBtn} onPress={onClose} accessibilityRole="button">
-          <Text style={styles.closeBtnText}>닫기</Text>
+        <Pressable style={[styles.closeBtn, { backgroundColor: t.mintSoft }]} onPress={onClose} accessibilityRole="button">
+          <Text style={[styles.closeBtnText, { color: t.primaryDeep }]}>닫기</Text>
         </Pressable>
       </View>
     </Modal>
@@ -114,10 +115,11 @@ function DetailRow({
   regretCount: number;
   regretRate: number;
 }) {
+  const t = useInsightsPalette();
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowMeta}>
+    <View style={[styles.row, { borderTopColor: t.border }]}>
+      <Text style={[styles.rowLabel, { color: t.text }]}>{label}</Text>
+      <Text style={[styles.rowMeta, { color: t.textSecondary }]}>
         {totalCount > 0
           ? `${totalCount}건 · 후회 ${regretCount} · ${regretRate.toFixed(0)}%`
           : '기록 없음'}
@@ -129,10 +131,8 @@ function DetailRow({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(32, 37, 34, 0.35)',
   },
   sheet: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -144,25 +144,21 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: INSIGHTS_THEME.border,
     marginBottom: 14,
   },
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: INSIGHTS_THEME.text,
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
     marginTop: 4,
     marginBottom: 14,
   },
   list: { flexGrow: 0 },
   peakBox: {
-    backgroundColor: INSIGHTS_THEME.mintSoft,
     borderRadius: 14,
     padding: 12,
     gap: 4,
@@ -171,18 +167,15 @@ const styles = StyleSheet.create({
   peakTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: INSIGHTS_THEME.primaryDeep,
   },
   peakText: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.text,
     lineHeight: 20,
   },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: INSIGHTS_THEME.textSecondary,
     marginBottom: 8,
   },
   row: {
@@ -192,18 +185,15 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: INSIGHTS_THEME.border,
   },
   rowLabel: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.text,
   },
   rowMeta: {
     fontSize: 13,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   closeBtn: {
@@ -211,11 +201,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 14,
-    backgroundColor: INSIGHTS_THEME.mintSoft,
   },
   closeBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.primaryDeep,
   },
 });

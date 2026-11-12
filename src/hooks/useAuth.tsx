@@ -8,7 +8,7 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Account } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME, resolveReviewDelayDays, resolveRegretPatternAlertEnabled } from '@/lib/accountSettings';
@@ -44,8 +44,14 @@ interface AuthContextType {
   changeEmail: (newEmail: string, currentPassword: string) => Promise<void>;
   changePassword: (newPassword: string, currentPassword: string) => Promise<void>;
   updateNickname: (nickname: string) => Promise<void>;
-  signInAsGuest: () => Promise<void>;
-  isGuest: boolean;
+  updateProfileFields: (patch: {
+    nickname?: string;
+    profileImageKey?: string | null;
+  }) => Promise<{ nickname?: string; profileImageKey?: string | null }>;
+  /** 이메일 등 비익명 제공자로 로그인한 정식 회원 */
+  isRegistered: boolean;
+  /** 과거에 남은 익명 세션. 신규 게스트 생성 경로가 아님 */
+  isAnonymousSession: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -174,18 +180,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [account?.id, user?.uid]);
 
-  const signInAsGuest = useCallback(async () => {
-    try {
-      await signInAnonymously(auth);
-      // onAuthStateChanged가 자동으로 account를 설정해줌
-    } catch (error: any) {
-      console.error('Guest sign in failed:', error);
-      throw new Error('게스트 로그인에 실패했습니다.');
-    }
-  }, []);
-
-  // 현재 유저가 익명(게스트)인지 여부
-  const isGuest = user?.isAnonymous ?? false;
+  const isAnonymousSession = user?.isAnonymous ?? false;
+  const isRegistered = Boolean(user && !user.isAnonymous);
 
   const updateReviewReminderSettings = useCallback(
     async (enabled: boolean, reviewReminderTime: string) => {
@@ -294,6 +290,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAccount((prev) => (prev ? { ...prev, nickname: saved } : null));
   }, []);
 
+  const updateProfileFields = useCallback(async (patch: {
+    nickname?: string;
+    profileImageKey?: string | null;
+  }) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      throw new Error('로그인이 필요해요.');
+    }
+    const accountId = toAccountId(uid);
+    const saved = await authService.updateProfileFields(accountId, uid, patch);
+    setAccount((prev) =>
+      prev
+        ? {
+            ...prev,
+            ...(saved.nickname != null ? { nickname: saved.nickname } : {}),
+            ...(saved.profileImageKey !== undefined
+              ? { profileImageKey: saved.profileImageKey, profileImageUpdatedAt: new Date() }
+              : {}),
+          }
+        : null,
+    );
+    return saved;
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -312,8 +332,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       changeEmail,
       changePassword,
       updateNickname,
-      signInAsGuest,
-      isGuest,
+      updateProfileFields,
+      isRegistered,
+      isAnonymousSession,
     }),
     [
       user,
@@ -332,8 +353,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       changeEmail,
       changePassword,
       updateNickname,
-      signInAsGuest,
-      isGuest,
+      updateProfileFields,
+      isRegistered,
+      isAnonymousSession,
     ]
   );
 

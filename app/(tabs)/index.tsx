@@ -23,6 +23,7 @@ import { HomeRegretAnalysisCard } from '@/components/home/HomeRegretAnalysisCard
 import { HomeRegretPatternCard } from '@/components/home/HomeRegretPatternCard';
 import { HomeRegretPatternAlertSheet } from '@/components/home/HomeRegretPatternAlertSheet';
 import { HomeCompactSpendingSummary } from '@/components/home/HomeCompactSpendingSummary';
+import { HomeTogetherRecordsCard } from '@/components/home/HomeTogetherRecordsCard';
 import { PhotoCalendarDayCell } from '@/components/home/PhotoCalendarDayCell';
 import { HomeDayExpenseModal } from '@/components/home/HomeDayExpenseModal';
 import { ShareNotificationsModal } from '@/components/ShareNotificationsModal';
@@ -68,7 +69,7 @@ export default function HomeScreen() {
   const isCompact = height < 760 || width < 420;
   const isWeb = Platform.OS === 'web';
   const calendarMaxWidth = Math.min(width - (isCompact ? 16 : 32), 980);
-  const { user, account, loading: authLoading } = useAuth();
+  const { user, account, loading: authLoading, isRegistered } = useAuth();
   const [expenses, setExpenses] = React.useState<Expense[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
@@ -195,7 +196,7 @@ export default function HomeScreen() {
   const monthCategoryTotals = React.useMemo(() => summarizeMonthByCategory(periodExpenses), [periodExpenses]);
   const monthTotalAmount = monthCategoryTotals.total;
   const foodBudgetKrw = account ? toFoodBudgetKrw(account) : 0;
-  useRegretPatternAlertSync(account, `${expenses.length}:${reviewsByExpenseId.size}`);
+  useRegretPatternAlertSync(isRegistered ? account : null, `${expenses.length}:${reviewsByExpenseId.size}`);
   useRefreshPendingReviewCountOnFocus();
   const loadCommentNotifications = React.useCallback(async () => {
     if (!user?.uid) {
@@ -452,7 +453,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
     );
   }
 
-  if (!user || !account) {
+  if (!isRegistered || !user || !account) {
     return null;
   }
 
@@ -654,6 +655,11 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
           })}
         />
 
+        <HomeTogetherRecordsCard
+          elevation={cardElev}
+          onPress={() => router.push('/spaces')}
+        />
+
         {loading ? (
           <View style={styles.monthStateWrap}>
             <ActivityIndicator size="large" color={BRAND_GREEN} />
@@ -695,6 +701,7 @@ const loadMonthExpensesRef = React.useRef<((silent: boolean) => Promise<any>) | 
         onClose={handleShareNotificationsClose}
         onUnreadChange={handleShareUnreadChange}
       />
+
     </View>
   );
 }

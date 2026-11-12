@@ -9,7 +9,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { InsightsWindow } from '@/lib/types';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 import { currentInsightsYear } from '@/lib/insightsPeriodNav';
 
 type Props = {
@@ -29,6 +29,7 @@ export function InsightsPeriodPickerSheet({
   onSelectMonth,
   onSelectYear,
 }: Props) {
+  const t = useInsightsPalette();
   const insets = useSafeAreaInsets();
   const isYearMode = insightsWindow.mode === 'year';
   const [draftYear, setDraftYear] = useState(insightsWindow.year);
@@ -47,26 +48,36 @@ export function InsightsPeriodPickerSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="닫기" />
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <View style={styles.handle} />
+      <Pressable style={[styles.backdrop, { backgroundColor: t.overlay }]} onPress={onClose} accessibilityLabel="닫기" />
+      <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.handle, { backgroundColor: t.border }]} />
 
         {isYearMode ? (
           <>
-            <Text style={styles.sheetTitle}>연도 선택</Text>
+            <Text style={[styles.sheetTitle, { color: t.text }]}>연도 선택</Text>
             <View style={styles.yearList}>
               {yearOptions.map((year) => {
                 const active = insightsWindow.year === year;
                 return (
                   <Pressable
                     key={year}
-                    style={[styles.yearCell, active && styles.monthCellActive]}
+                    style={[
+                      styles.yearCell,
+                      { backgroundColor: t.bg },
+                      active && { backgroundColor: t.mintSoft },
+                    ]}
                     onPress={() => {
                       onSelectYear(year);
                       onClose();
                     }}
                   >
-                    <Text style={[styles.yearCellText, active && styles.monthCellTextActive]}>
+                    <Text
+                      style={[
+                        styles.yearCellText,
+                        { color: t.textSecondary },
+                        active && { color: t.primaryDeep, fontWeight: '700' },
+                      ]}
+                    >
                       {year}년
                     </Text>
                   </Pressable>
@@ -86,10 +97,10 @@ export function InsightsPeriodPickerSheet({
                 <MaterialIcons
                   name="chevron-left"
                   size={24}
-                  color={canPrevYear ? INSIGHTS_THEME.text : INSIGHTS_THEME.textMuted}
+                  color={canPrevYear ? t.text : t.textMuted}
                 />
               </Pressable>
-              <Text style={styles.yearNavLabel}>{draftYear}년</Text>
+              <Text style={[styles.yearNavLabel, { color: t.text }]}>{draftYear}년</Text>
               <Pressable
                 onPress={() => canNextYear && setDraftYear((y) => y + 1)}
                 disabled={!canNextYear}
@@ -99,7 +110,7 @@ export function InsightsPeriodPickerSheet({
                 <MaterialIcons
                   name="chevron-right"
                   size={24}
-                  color={canNextYear ? INSIGHTS_THEME.text : INSIGHTS_THEME.textMuted}
+                  color={canNextYear ? t.text : t.textMuted}
                 />
               </Pressable>
             </View>
@@ -118,7 +129,8 @@ export function InsightsPeriodPickerSheet({
                     key={label}
                     style={[
                       styles.monthCell,
-                      active && styles.monthCellActive,
+                      { backgroundColor: t.bg },
+                      active && { backgroundColor: t.mintSoft },
                       futureBlocked && styles.monthCellDisabled,
                     ]}
                     disabled={futureBlocked}
@@ -130,8 +142,9 @@ export function InsightsPeriodPickerSheet({
                     <Text
                       style={[
                         styles.monthCellText,
-                        active && styles.monthCellTextActive,
-                        futureBlocked && styles.monthCellTextDisabled,
+                        { color: t.textSecondary },
+                        active && { color: t.primaryDeep, fontWeight: '700' },
+                        futureBlocked && { color: t.textMuted },
                       ]}
                     >
                       {label}
@@ -150,10 +163,8 @@ export function InsightsPeriodPickerSheet({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(32, 37, 34, 0.35)',
   },
   sheet: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -165,13 +176,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: INSIGHTS_THEME.border,
     marginBottom: 4,
   },
   sheetTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     textAlign: 'center',
   },
   yearNav: {
@@ -183,7 +192,6 @@ const styles = StyleSheet.create({
   yearNavLabel: {
     fontSize: 17,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     minWidth: 88,
     textAlign: 'center',
   },
@@ -207,10 +215,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: INSIGHTS_THEME.bg,
-  },
-  monthCellActive: {
-    backgroundColor: INSIGHTS_THEME.mintSoft,
   },
   monthCellDisabled: {
     opacity: 0.35,
@@ -218,14 +222,6 @@ const styles = StyleSheet.create({
   monthCellText: {
     fontSize: 15,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
-  },
-  monthCellTextActive: {
-    color: INSIGHTS_THEME.primaryDeep,
-    fontWeight: '700',
-  },
-  monthCellTextDisabled: {
-    color: INSIGHTS_THEME.textMuted,
   },
   yearList: {
     gap: 8,
@@ -235,11 +231,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: INSIGHTS_THEME.bg,
   },
   yearCellText: {
     fontSize: 16,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textSecondary,
   },
 });

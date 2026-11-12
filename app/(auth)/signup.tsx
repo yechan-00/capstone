@@ -7,6 +7,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
+import { hrefAfterAuth } from '@/lib/spaceInviteClient';
 import { AuthFormContainer } from '@/components/AuthFormContainer';
 import { AuthPasswordField, PASSWORD_LABEL } from '@/components/AuthPasswordField';
 import { AuthSubmitButton, webEnterKeyProps } from '@/components/AuthSubmitButton';
@@ -54,7 +55,7 @@ export default function SignUpScreen() {
     try {
       setLoading(true);
       await signUp(email, password);
-      showNotice('회원가입이 완료되었습니다.', '성공', () => router.replace('/(tabs)'));
+      showNotice('회원가입이 완료되었습니다.', '성공', () => router.replace(hrefAfterAuth()));
     } catch (error: unknown) {
       showNotice(mapFirebaseAuthError(error, '회원가입에 실패했습니다.'), '회원가입 실패');
     } finally {

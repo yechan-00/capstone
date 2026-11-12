@@ -4,6 +4,8 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  Pressable,
+  Text,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -31,6 +33,7 @@ import { ExpenseReasonSection } from '@/components/expenseDetail/ExpenseReasonSe
 import { ExpenseReviewSection } from '@/components/expenseDetail/ExpenseReviewSection';
 import { SimilarExpensePatternCard } from '@/components/expenseDetail/SimilarExpensePatternCard';
 import { ExpenseCommentSection } from '@/components/expenseDetail/ExpenseCommentSection';
+import { ShareToSpaceSheet } from '@/components/expenseDetail/ShareToSpaceSheet';
 
 function expenseDetailTitle(expense: Expense): string {
   const item = expense.item?.trim();
@@ -64,6 +67,7 @@ export default function ExpenseDetailScreen() {
     () => new Map(),
   );
   const [similarReviewsReady, setSimilarReviewsReady] = useState(false);
+  const [shareToSpaceOpen, setShareToSpaceOpen] = useState(false);
   const [headerCompact, setHeaderCompact] = useState(false);
   const headerCompactRef = useRef(false);
   const scrollYRef = useRef(0);
@@ -385,6 +389,18 @@ export default function ExpenseDetailScreen() {
           />
         </View>
 
+        <Pressable
+          onPress={() => setShareToSpaceOpen(true)}
+          style={[styles.spaceShare, { backgroundColor: palette.surface, borderColor: palette.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="공유 공간에 공유"
+        >
+          <Text style={[styles.spaceShareTitle, { color: palette.text }]}>공유 공간에 공유</Text>
+          <Text style={[styles.spaceShareDesc, { color: palette.textSec }]}>
+            제목·금액·날짜·카테고리만 복사돼요. 개인 소비는 그대로 남아요.
+          </Text>
+        </Pressable>
+
         <ExpenseReasonSection
           reasonChips={reasonParts.chips}
           tags={expense.tags}
@@ -420,6 +436,11 @@ export default function ExpenseDetailScreen() {
         accessibilityLabel={`${title} 사진`}
         onClose={() => setViewerOpen(false)}
       />
+      <ShareToSpaceSheet
+        visible={shareToSpaceOpen}
+        expense={expense}
+        onClose={() => setShareToSpaceOpen(false)}
+      />
     </View>
   );
 }
@@ -437,4 +458,14 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
   },
+  spaceShare: {
+    marginTop: 16,
+    marginBottom: 4,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  spaceShareTitle: { fontSize: 15, fontWeight: '800' },
+  spaceShareDesc: { marginTop: 4, fontSize: 12, fontWeight: '600', lineHeight: 18 },
 });

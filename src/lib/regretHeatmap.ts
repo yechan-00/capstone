@@ -11,13 +11,21 @@ import { INSIGHTS_THEME } from '@/theme/insightsTheme';
 export function regretHeatmapCellColor(
   cell: WeekdayTimeCell,
   isPeak: boolean,
+  theme: {
+    heatmapEmpty: string;
+    heatmapZero: string;
+    heatmapPeak: string;
+    heatmapHigh: string;
+    heatmapMid: string;
+    heatmapLow: string;
+  } = INSIGHTS_THEME,
 ): string {
-  if (cell.totalCount === 0) return INSIGHTS_THEME.heatmapEmpty;
-  if (cell.regretRate === 0) return INSIGHTS_THEME.heatmapZero;
-  if (isPeak) return INSIGHTS_THEME.heatmapPeak;
-  if (cell.regretRate >= 50) return INSIGHTS_THEME.heatmapHigh;
-  if (cell.regretRate >= 25) return INSIGHTS_THEME.heatmapMid;
-  return INSIGHTS_THEME.heatmapLow;
+  if (cell.totalCount === 0) return theme.heatmapEmpty;
+  if (cell.regretRate === 0) return theme.heatmapZero;
+  if (isPeak) return theme.heatmapPeak;
+  if (cell.regretRate >= 50) return theme.heatmapHigh;
+  if (cell.regretRate >= 25) return theme.heatmapMid;
+  return theme.heatmapLow;
 }
 
 export function findPeakHeatmapCell(cells: WeekdayTimeCell[]): WeekdayTimeCell | null {

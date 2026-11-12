@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { WeekdayTimeCell } from '@/lib/types';
 import { cellAccessibilityLabel } from '@/lib/regretHeatmap';
 import { TIME_OF_DAY_LABELS, weekdayLabel } from '@/lib/timePatternInsight';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   visible: boolean;
@@ -24,6 +24,7 @@ function formatWon(n: number): string {
 }
 
 export function HeatmapCellDetailSheet({ visible, cell, onClose }: Props) {
+  const t = useInsightsPalette();
   const insets = useSafeAreaInsets();
   if (!cell) return null;
 
@@ -32,13 +33,13 @@ export function HeatmapCellDetailSheet({ visible, cell, onClose }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="닫기" />
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <Text style={styles.title}>
+      <Pressable style={[styles.backdrop, { backgroundColor: t.overlay }]} onPress={onClose} accessibilityLabel="닫기" />
+      <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <Text style={[styles.title, { color: t.text }]}>
           {weekdayLabel(cell.weekday)} · {TIME_OF_DAY_LABELS[cell.timeOfDay]}
         </Text>
         {cell.totalCount === 0 ? (
-          <Text style={styles.body}>이 시간대 기록이 없어요.</Text>
+          <Text style={[styles.body, { color: t.textMuted }]}>이 시간대 기록이 없어요.</Text>
         ) : (
           <View style={styles.rows}>
             <Row label="소비" value={`${cell.totalCount}건`} />
@@ -47,9 +48,9 @@ export function HeatmapCellDetailSheet({ visible, cell, onClose }: Props) {
             {avg !== null ? <Row label="평균 소비" value={formatWon(avg)} /> : null}
           </View>
         )}
-        <Text style={styles.a11y}>{cellAccessibilityLabel(cell)}</Text>
-        <Pressable style={styles.closeBtn} onPress={onClose} accessibilityRole="button">
-          <Text style={styles.closeBtnText}>닫기</Text>
+        <Text style={[styles.a11y, { color: t.textMuted }]}>{cellAccessibilityLabel(cell)}</Text>
+        <Pressable style={[styles.closeBtn, { backgroundColor: t.mintSoft }]} onPress={onClose} accessibilityRole="button">
+          <Text style={[styles.closeBtnText, { color: t.primaryDeep }]}>닫기</Text>
         </Pressable>
       </View>
     </Modal>
@@ -57,10 +58,11 @@ export function HeatmapCellDetailSheet({ visible, cell, onClose }: Props) {
 }
 
 function Row({ label, value }: { label: string; value: string }) {
+  const t = useInsightsPalette();
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
+    <View style={[styles.row, { borderTopColor: t.border }]}>
+      <Text style={[styles.rowLabel, { color: t.textMuted }]}>{label}</Text>
+      <Text style={[styles.rowValue, { color: t.text }]}>{value}</Text>
     </View>
   );
 }
@@ -68,11 +70,9 @@ function Row({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(32, 37, 34, 0.35)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -81,13 +81,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: INSIGHTS_THEME.text,
     marginBottom: 12,
   },
   body: {
     fontSize: 14,
     fontWeight: '500',
-    color: INSIGHTS_THEME.textMuted,
     marginBottom: 12,
   },
   rows: { gap: 0, marginBottom: 8 },
@@ -96,33 +94,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: INSIGHTS_THEME.border,
   },
   rowLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   rowValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   a11y: {
     fontSize: 12,
-    color: INSIGHTS_THEME.textMuted,
     marginBottom: 12,
   },
   closeBtn: {
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 14,
-    backgroundColor: INSIGHTS_THEME.mintSoft,
   },
   closeBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.primaryDeep,
   },
 });

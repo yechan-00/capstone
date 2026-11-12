@@ -15,6 +15,7 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { toAccountId } from '@/lib/accountId';
+import { normalizeNickname, parseProfileImageKey } from '@/lib/profileImage';
 import { Account } from '@/lib/types';
 import type { RegretPatternAlertSlot } from '@/lib/types';
 import { DEFAULT_REVIEW_DELAY_DAYS, DEFAULT_REVIEW_REMINDER_TIME } from '@/lib/accountSettings';
@@ -36,35 +37,43 @@ export const signUp = async (email: string, password: string): Promise<UserCrede
 
     const user = userCredential.user;
 
-    // 회원가입 후 자동으로 Account 생성
     const accountId = toAccountId(user.uid);
-    const account: Account = {
-      id: accountId,
-      userId: user.uid,
-      name: '내 가계부',
-      nickname: '',
-      notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
-      reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
-      reviewReminderEnabled: true,
-      regretPatternAlertEnabled: true,
-      reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
-      monthlyIncomeAmount: 0,
-      monthlyIncomeCurrency: 'KRW',
-      exchangeRateUsdToKrw: 1470.05,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const accountRef = doc(db, 'accounts', accountId);
+    const existing = await getDoc(accountRef);
 
-    // 기존 게스트가 이미 계정 문서를 가지고 있을 수 있으므로 merge로 안전하게 갱신
-    await setDoc(
-      doc(db, 'accounts', accountId),
-      {
-        ...account,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    if (existing.exists()) {
+      const prev = existing.data() ?? {};
+      await setDoc(
+        accountRef,
+        {
+          id: typeof prev.id === 'string' && prev.id.length > 0 ? prev.id : accountId,
+          userId: typeof prev.userId === 'string' && prev.userId.length > 0 ? prev.userId : user.uid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } else {
+      await setDoc(
+        accountRef,
+        {
+          id: accountId,
+          userId: user.uid,
+          name: '내 가계부',
+          nickname: '',
+          notificationTime: DEFAULT_REVIEW_REMINDER_TIME,
+          reviewReminderTime: DEFAULT_REVIEW_REMINDER_TIME,
+          reviewReminderEnabled: true,
+          regretPatternAlertEnabled: true,
+          reviewDelayDays: [...DEFAULT_REVIEW_DELAY_DAYS],
+          monthlyIncomeAmount: 0,
+          monthlyIncomeCurrency: 'KRW',
+          exchangeRateUsdToKrw: 1470.05,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
 
     return userCredential;
   } catch (error: any) {
@@ -130,6 +139,10 @@ export const getUserAccount = async (userId: string): Promise<Account | null> =>
       userId: data.userId,
       name: data.name,
       nickname: typeof data.nickname === 'string' ? data.nickname : '',
+      profileImageKey: parseProfileImageKey(data.profileImageKey, userId)?.key ?? null,
+      profileImageUpdatedAt: data.profileImageUpdatedAt
+        ? timestampToDate(data.profileImageUpdatedAt)
+        : undefined,
       notificationTime: typeof data.notificationTime === 'string' ? data.notificationTime : undefined,
       reviewReminderTime,
       reviewReminderEnabled: data.reviewReminderEnabled !== false,
@@ -228,10 +241,8 @@ export const updateReviewDelayDays = async (
   }
 };
 
-const NICKNAME_MAX = 24;
-
 export const updateNickname = async (accountId: string, nickname: string): Promise<string> => {
-  const trimmed = nickname.trim().slice(0, NICKNAME_MAX);
+  const trimmed = normalizeNickname(nickname);
   try {
     await setDoc(
       doc(db, 'accounts', accountId),
@@ -245,6 +256,45 @@ export const updateNickname = async (accountId: string, nickname: string): Promi
   } catch (error) {
     console.error('Failed to update nickname:', error);
     throw new Error('닉네임을 저장하는데 실패했습니다.');
+  }
+};
+
+export type ProfileFieldsPatch = {
+  nickname?: string;
+  profileImageKey?: string | null;
+};
+
+export const updateProfileFields = async (
+  accountId: string,
+  uid: string,
+  patch: ProfileFieldsPatch,
+): Promise<{ nickname?: string; profileImageKey?: string | null }> => {
+  const data: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  const result: { nickname?: string; profileImageKey?: string | null } = {};
+  if (typeof patch.nickname === 'string') {
+    const nickname = normalizeNickname(patch.nickname);
+    data.nickname = nickname;
+    result.nickname = nickname;
+  }
+  if (patch.profileImageKey === null) {
+    data.profileImageKey = null;
+    data.profileImageUpdatedAt = serverTimestamp();
+    result.profileImageKey = null;
+  } else if (typeof patch.profileImageKey === 'string') {
+    const parsed = parseProfileImageKey(patch.profileImageKey, uid);
+    if (!parsed) {
+      throw new Error('프로필 사진을 저장할 수 없어요.');
+    }
+    data.profileImageKey = parsed.key;
+    data.profileImageUpdatedAt = serverTimestamp();
+    result.profileImageKey = parsed.key;
+  }
+  try {
+    await setDoc(doc(db, 'accounts', accountId), data, { merge: true });
+    return result;
+  } catch (error) {
+    console.error('Failed to update profile fields:', error);
+    throw new Error('프로필을 저장하는데 실패했습니다.');
   }
 };
 

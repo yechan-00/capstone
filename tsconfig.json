@@ -9,5 +9,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"],
-  "exclude": ["node_modules", "node_modules.bak.*", "workers"]
+  "exclude": ["node_modules", "node_modules.bak.*", "workers", "**/*.test.ts"]
 }

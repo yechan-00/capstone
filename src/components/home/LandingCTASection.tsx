@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { HOME, HOME_COPY } from '@/components/home/homeTheme';

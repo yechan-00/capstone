@@ -5,6 +5,9 @@ export interface Account {
   name: string;
   /** 앱에 표시할 사용자 닉네임 (가계부 이름 name과 별도) */
   nickname?: string;
+  /** R2 프로필 객체 키. 서명 URL은 저장하지 않음 */
+  profileImageKey?: string | null;
+  profileImageUpdatedAt?: Date;
   /** @deprecated 하위 호환용. 신규 필드 reviewReminderTime 우선 */
   notificationTime?: string; // "HH:mm"
   /** 리뷰 알림 시각 (HH:mm). 없으면 notificationTime 또는 19:00 */

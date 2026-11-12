@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatBudgetPeriodRange } from '@/lib/budgetPeriod';
 import { budgetRatioColor, budgetRemainColor } from '@/lib/insightsBudgetColors';
 import type { FoodBudgetInsight, IncomeInsight } from '@/lib/types';
-import { INSIGHTS_THEME } from '@/theme/insightsTheme';
+import { useInsightsPalette } from '@/theme/insightsTheme';
 
 type Props = {
   visible: boolean;
@@ -38,6 +38,7 @@ export function BudgetDetailSheet({
   periodEnd,
   periodMode,
 }: Props) {
+  const t = useInsightsPalette();
   const insets = useSafeAreaInsets();
 
   if (!kind) return null;
@@ -46,10 +47,10 @@ export function BudgetDetailSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="닫기" />
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <View style={styles.handle} />
-        <Text style={styles.title}>{title}</Text>
+      <Pressable style={[styles.backdrop, { backgroundColor: t.overlay }]} onPress={onClose} accessibilityLabel="닫기" />
+      <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.handle, { backgroundColor: t.border }]} />
+        <Text style={[styles.title, { color: t.text }]}>{title}</Text>
 
         {kind === 'food' && foodBudget ? (
           <View style={styles.rows}>
@@ -87,8 +88,8 @@ export function BudgetDetailSheet({
           </View>
         ) : null}
 
-        <Pressable style={styles.closeBtn} onPress={onClose} accessibilityRole="button">
-          <Text style={styles.closeBtnText}>닫기</Text>
+        <Pressable style={[styles.closeBtn, { backgroundColor: t.mintSoft }]} onPress={onClose} accessibilityRole="button">
+          <Text style={[styles.closeBtnText, { color: t.primaryDeep }]}>닫기</Text>
         </Pressable>
       </View>
     </Modal>
@@ -104,10 +105,11 @@ function Row({
   value: string;
   valueColor?: string;
 }) {
+  const t = useInsightsPalette();
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
+    <View style={[styles.row, { borderTopColor: t.border }]}>
+      <Text style={[styles.rowLabel, { color: t.textMuted }]}>{label}</Text>
+      <Text style={[styles.rowValue, { color: valueColor ?? t.text }]}>{value}</Text>
     </View>
   );
 }
@@ -115,10 +117,8 @@ function Row({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(32, 37, 34, 0.35)',
   },
   sheet: {
-    backgroundColor: INSIGHTS_THEME.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -129,13 +129,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: INSIGHTS_THEME.border,
     marginBottom: 14,
   },
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: INSIGHTS_THEME.text,
     marginBottom: 16,
   },
   rows: { gap: 0 },
@@ -145,17 +143,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: INSIGHTS_THEME.border,
   },
   rowLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: INSIGHTS_THEME.textMuted,
   },
   rowValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.text,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   closeBtn: {
@@ -163,11 +158,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 14,
-    backgroundColor: INSIGHTS_THEME.mintSoft,
   },
   closeBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: INSIGHTS_THEME.primaryDeep,
   },
 });
