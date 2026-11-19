@@ -9,6 +9,16 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "competition": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SHARE_BASE_URL": "https://regret-wallet-3db60.web.app",
+        "EXPO_PUBLIC_R2_IMAGE_API_URL": "https://regret-wallet-images.regret-wallet-3db60.workers.dev"
+      }
     }
   }
 }
