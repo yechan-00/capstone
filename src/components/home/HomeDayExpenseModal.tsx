@@ -145,7 +145,13 @@ export function HomeDayExpenseModal({
     photoBg: isDark ? colors.surfaceMuted : '#F7F8F7',
     mintFill: isDark ? colors.choiceActiveBg : '#EEF8F2',
     mintText: isDark ? BRAND_GREEN : '#3E7A61',
-    editBg: isDark ? colors.surfaceMuted : '#F5F6F5',
+    // Day-detail action hierarchy (light): detail mint / edit gray / delete white+red
+    detailBg: isDark ? colors.choiceActiveBg : '#EAF4EE',
+    detailText: isDark ? BRAND_GREEN : '#34785F',
+    editBg: isDark ? colors.surfaceMuted : '#F5F7F6',
+    editText: isDark ? colors.textSec : '#45564D',
+    deleteBg: isDark ? colors.surface : '#FFFFFF',
+    deleteText: isDark ? colors.logoutText : '#D84A4A',
     divider: isDark ? colors.border : 'rgba(32, 37, 34, 0.08)',
     dim: isDark ? 'rgba(8, 10, 9, 0.48)' : 'rgba(32, 37, 34, 0.28)',
     handle: isDark ? colors.border : '#D8E0DB',
@@ -356,22 +362,13 @@ export function HomeDayExpenseModal({
                             accessibilityLabel="상세 보기"
                             style={({ pressed }) => [
                               styles.actionBtn,
-                              canReview
-                                ? {
-                                    backgroundColor: sheet.editBg,
-                                    borderWidth: 1,
-                                    borderColor: sheet.cardBorder,
-                                    opacity: pressed ? 0.88 : 1,
-                                  }
-                                : { backgroundColor: sheet.mintFill, opacity: pressed ? 0.88 : 1 },
+                              {
+                                backgroundColor: sheet.detailBg,
+                                opacity: pressed ? 0.88 : 1,
+                              },
                             ]}
                           >
-                            <Text
-                              style={[
-                                styles.actionBtnText,
-                                { color: canReview ? colors.text : sheet.mintText },
-                              ]}
-                            >
+                            <Text style={[styles.actionBtnText, { color: sheet.detailText }]}>
                               상세 보기
                             </Text>
                           </Pressable>
@@ -383,13 +380,11 @@ export function HomeDayExpenseModal({
                               styles.actionBtn,
                               {
                                 backgroundColor: sheet.editBg,
-                                borderWidth: 1,
-                                borderColor: sheet.cardBorder,
                                 opacity: pressed ? 0.88 : 1,
                               },
                             ]}
                           >
-                            <Text style={[styles.actionBtnText, { color: colors.text }]}>수정</Text>
+                            <Text style={[styles.actionBtnText, { color: sheet.editText }]}>수정</Text>
                           </Pressable>
                           <Pressable
                             onPress={() => onDeleteExpense(item.id, title, dayKey)}
@@ -398,14 +393,14 @@ export function HomeDayExpenseModal({
                             style={({ pressed }) => [
                               styles.actionBtn,
                               {
-                                backgroundColor: sheet.cardBg,
+                                backgroundColor: sheet.deleteBg,
                                 borderWidth: 1,
                                 borderColor: sheet.cardBorder,
                                 opacity: pressed ? 0.88 : 1,
                               },
                             ]}
                           >
-                            <Text style={[styles.actionBtnText, { color: colors.logoutText }]}>삭제</Text>
+                            <Text style={[styles.actionBtnText, { color: sheet.deleteText }]}>삭제</Text>
                           </Pressable>
                         </View>
                         {canReview && reviewState.schedule ? (

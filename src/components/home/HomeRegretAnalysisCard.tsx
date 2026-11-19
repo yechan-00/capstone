@@ -35,7 +35,8 @@ export function HomeRegretAnalysisCard({
   const { colors, isDark } = useTheme();
   const windowWidth = useWindowDimensions().width;
   const compact = windowWidth < 360;
-  const chartHeight = compact ? 80 : 92;
+  // ~10% shorter card: chart is the main vertical driver (was 80 / 92).
+  const chartHeight = compact ? 72 : 83;
   const [chartWidth, setChartWidth] = React.useState(0);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [selectedPoint, setSelectedPoint] = React.useState<DailyRegretPoint | null>(null);
@@ -143,8 +144,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 10,
+    paddingTop: 12,
+    paddingBottom: 9,
     shadowColor: '#123C2B',
     shadowOffset: { width: 0, height: 8 },
     shadowRadius: 20,
@@ -156,7 +157,7 @@ const styles = StyleSheet.create({
     gap: 0,
     marginBottom: 2,
   },
-  label: { fontSize: 13, fontWeight: '800', letterSpacing: -0.2 },
+  label: { fontSize: 12, fontWeight: '800', letterSpacing: -0.2 },
   infoBtn: {
     width: 44,
     height: 44,
@@ -178,16 +179,16 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   rate: {
-    fontSize: 38,
-    lineHeight: 43,
+    fontSize: 34,
+    lineHeight: 39,
     fontWeight: '800',
     letterSpacing: -1.4,
     ...Platform.select({ ios: { fontVariant: ['tabular-nums' as const] }, default: {} }),
   },
   caption: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 18,
+    marginTop: 7,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '600',
   },
   trendCol: {
@@ -208,11 +209,11 @@ const styles = StyleSheet.create({
     lineHeight: 13,
     fontWeight: '700',
     textAlign: 'center',
-    marginTop: 5,
+    marginTop: 4,
   },
   footer: {
-    marginTop: 6,
-    paddingTop: 6,
+    marginTop: 5,
+    paddingTop: 5,
     borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
